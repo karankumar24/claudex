@@ -53,17 +53,26 @@ def get_repo_snapshot(config: dict) -> str:
     if diff_stat:
         parts.append("**Diff stat:**\n```\n" + diff_stat.strip() + "\n```\n")
 
-    diff = _run_git(["git", "diff"])
-    if diff:
-        n_lines = diff.count("\n")
-        n_bytes = len(diff.encode("utf-8"))
-        if n_lines <= max_diff_lines and n_bytes <= max_diff_bytes:
-            parts.append("**Full diff:**\n```diff\n" + diff.strip() + "\n```\n")
-        else:
-            parts.append(
-                f"**Full diff omitted** ({n_lines} lines, {n_bytes} bytes). "
-                "Inspect individual files as needed.\n"
-            )
+    # Avoid fetching the full patch if numstat already shows it exceeds line limits.
+    numstat = _run_git(["git", "diff", "--numstat"])
+    estimated_lines = _estimate_changed_lines(numstat)
+    if estimated_lines is not None and estimated_lines > max_diff_lines:
+        parts.append(
+            f"**Full diff omitted** ({estimated_lines} changed lines exceed "
+            f"the {max_diff_lines}-line limit). Inspect individual files as needed.\n"
+        )
+    else:
+        diff = _run_git(["git", "diff"])
+        if diff:
+            n_lines = len(diff.splitlines())
+            n_bytes = len(diff.encode("utf-8"))
+            if n_lines <= max_diff_lines and n_bytes <= max_diff_bytes:
+                parts.append("**Full diff:**\n```diff\n" + diff.strip() + "\n```\n")
+            else:
+                parts.append(
+                    f"**Full diff omitted** ({n_lines} lines, {n_bytes} bytes). "
+                    "Inspect individual files as needed.\n"
+                )
 
     return "\n".join(parts)
 
@@ -186,6 +195,33 @@ def _run_git(cmd: list[str]) -> str:
         return result.stdout if result.returncode == 0 else ""
     except Exception:
         return ""
+
+
+def _estimate_changed_lines(numstat_output: str) -> Optional[int]:
+    """
+    Estimate changed line count from `git diff --numstat` output.
+    Returns None when the format is unavailable or cannot be parsed.
+    """
+    if not numstat_output.strip():
+        return None
+
+    total = 0
+    parsed_any = False
+    for line in numstat_output.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        added, removed = parts[0], parts[1]
+        if added == "-" or removed == "-":
+            # Binary diff; line count is unknown from numstat.
+            return None
+        try:
+            total += int(added) + int(removed)
+            parsed_any = True
+        except ValueError:
+            continue
+
+    return total if parsed_any else None
 
 
 def _extract_section(text: str, section_name: str) -> str:

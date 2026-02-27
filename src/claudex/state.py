@@ -16,11 +16,11 @@ from .models import ClaudexState
 
 # ── Directory / file paths (relative to CWD) ─────────────────────────────────
 
-AISWITCH_DIR = Path(".claudex")
-STATE_FILE = AISWITCH_DIR / "state.json"
-HANDOFF_FILE = AISWITCH_DIR / "handoff.md"
-TRANSCRIPT_FILE = AISWITCH_DIR / "transcript.ndjson"
-REPO_CONFIG_FILE = AISWITCH_DIR / "config.toml"
+CLAUDEX_DIR = Path(".claudex")
+STATE_FILE = CLAUDEX_DIR / "state.json"
+HANDOFF_FILE = CLAUDEX_DIR / "handoff.md"
+TRANSCRIPT_FILE = CLAUDEX_DIR / "transcript.ndjson"
+REPO_CONFIG_FILE = CLAUDEX_DIR / "config.toml"
 
 # User-global config (lower priority than repo config)
 USER_CONFIG_FILE = Path.home() / ".config" / "claudex" / "config.toml"
@@ -31,7 +31,7 @@ USER_CONFIG_FILE = Path.home() / ".config" / "claudex" / "config.toml"
 
 def ensure_dir() -> None:
     """Create .claudex/ if it doesn't exist."""
-    AISWITCH_DIR.mkdir(exist_ok=True)
+    CLAUDEX_DIR.mkdir(exist_ok=True)
 
 
 # ── State read/write ──────────────────────────────────────────────────────────
@@ -95,5 +95,5 @@ def append_transcript(entry: dict) -> None:
 def clear_claudex() -> None:
     """Delete the entire .claudex/ directory (used by `claudex reset`)."""
     import shutil
-    if AISWITCH_DIR.exists():
-        shutil.rmtree(AISWITCH_DIR)
+    if CLAUDEX_DIR.exists():
+        shutil.rmtree(CLAUDEX_DIR)

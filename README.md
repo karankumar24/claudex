@@ -102,8 +102,7 @@ allowed_tools = ["Bash", "Edit", "Read"]
 
 [codex]
 model = "o4-mini"       # override model; omit to use codex default
-sandbox = "read-only"   # "read-only" (safe default) or "full-auto"
-approvals = "auto-edit" # omit to use codex default
+sandbox = "read-only"   # "read-only" | "workspace-write" | "danger-full-access" | "full-auto"
 
 [limits]
 max_diff_lines = 200    # lines of git diff to include in context
@@ -115,6 +114,7 @@ max_retries = 3         # TRANSIENT_RATE_LIMIT retries before switching
 backoff_base = 2.0      # exponential backoff base (seconds)
 backoff_max = 30.0      # max single wait
 cooldown_minutes = 60   # how long to cool down a QUOTA_EXHAUSTED provider
+transient_cooldown_minutes = 5 # cooldown after exhausted transient retries
 ```
 
 ## Error handling
@@ -122,7 +122,7 @@ cooldown_minutes = 60   # how long to cool down a QUOTA_EXHAUSTED provider
 | Error class | What triggers it | What claudex does |
 |---|---|---|
 | `QUOTA_EXHAUSTED` | "usage limit reached" in output | Switch immediately, 60-min cooldown |
-| `TRANSIENT_RATE_LIMIT` | 429 / "rate limit" | Retry with backoff up to max_retries, then switch with 5-min cooldown |
+| `TRANSIENT_RATE_LIMIT` | 429 / "rate limit" | Retry with backoff up to max_retries, then switch with transient cooldown |
 | `AUTH_REQUIRED` | 401 / "not authenticated" | Surface error and stop — you need to re-auth |
 | `OTHER_ERROR` | CLI crash, parse failure | Surface error and stop |
 

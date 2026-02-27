@@ -23,6 +23,7 @@ BASE_CONFIG = {
         "backoff_base": 0,       # zero sleep in tests
         "backoff_max": 0,
         "cooldown_minutes": 60,
+        "transient_cooldown_minutes": 5,
     },
     "limits": {},
     "claude": {},
@@ -219,6 +220,25 @@ def test_exhausted_retries_switches_provider(isolated_dir):
     assert result.success is True
     assert provider == Provider.CODEX
     assert claude_mock.run.call_count == 3  # 1 initial + 2 retries
+
+
+def test_transient_cooldown_uses_config_value(isolated_dir):
+    """Exhausted transient retries should apply configured short cooldown."""
+    config = dict(BASE_CONFIG)
+    config["retry"] = dict(BASE_CONFIG["retry"], max_retries=0, transient_cooldown_minutes=13)
+
+    claude_mock = _mock_provider(_err(ErrorClass.TRANSIENT_RATE_LIMIT))
+    codex_mock = _mock_provider(_ok(text="fallback"))
+    start = datetime.now(timezone.utc)
+
+    with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: codex_mock}):
+        result, provider, state = run_with_retry("hi", ClaudexState(), config)
+
+    assert result.success is True
+    assert provider == Provider.CODEX
+    assert state.claude.cooldown_until is not None
+    cooldown = state.claude.cooldown_until - start
+    assert cooldown.total_seconds() >= 12 * 60
 
 
 # ── run_with_retry — non-retriable errors ────────────────────────────────────

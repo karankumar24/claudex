@@ -25,7 +25,7 @@ from .handoff import update_handoff
 from .models import Provider
 from .router import get_available_providers, run_with_retry
 from .state import (
-    AISWITCH_DIR,
+    CLAUDEX_DIR,
     clear_claudex,
     load_handoff,
     load_state,
@@ -173,7 +173,10 @@ def chat() -> None:
             console.print("[dim]Goodbye.[/dim]")
             break
 
-        _run_turn(user_input, config)
+        try:
+            _run_turn(user_input, config)
+        except Exception as exc:  # noqa: BLE001
+            err_console.print(f"\n[bold red]Unexpected error:[/bold red] {exc}\n")
 
 
 @app.command()
@@ -254,7 +257,7 @@ def reset(
     Delete all .claudex/ state for the current repository.
     This clears sessions, handoff context, and the transcript log.
     """
-    if not AISWITCH_DIR.exists():
+    if not CLAUDEX_DIR.exists():
         console.print("[dim]Nothing to reset — .claudex/ does not exist.[/dim]")
         return
 
