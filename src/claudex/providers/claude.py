@@ -139,8 +139,11 @@ class ClaudeProvider(BaseProvider):
             is_error = result_obj.get("is_error", False)
             text = result_obj.get("result", "")
             session_id = result_obj.get("session_id")
+            subtype = str(result_obj.get("subtype", "")).lower()
+            errors = result_obj.get("errors")
+            has_errors = isinstance(errors, list) and any(str(e).strip() for e in errors)
 
-            if not is_error:
+            if not is_error and text:
                 return ProviderResult(
                     success=True,
                     text=text,
@@ -148,8 +151,21 @@ class ClaudeProvider(BaseProvider):
                     raw_output=raw,
                 )
 
+            # Some Claude CLI failures surface as subtype=error_during_execution
+            # with is_error=false and empty result text.
+            if not is_error and not text and "error" not in subtype and not has_errors:
+                return ProviderResult(
+                    success=True,
+                    text="",
+                    session_id=session_id,
+                    raw_output=raw,
+                )
+
             # is_error=True inside the JSON envelope
-            error_msg = text or raw
+            if has_errors:
+                error_msg = "\n".join(str(e) for e in errors)
+            else:
+                error_msg = text or raw
             return ProviderResult(
                 success=False,
                 session_id=session_id,
