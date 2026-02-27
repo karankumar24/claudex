@@ -10,9 +10,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aiswitch.models import AISwitchState, ErrorClass, Provider, ProviderState
-from aiswitch.providers.base import ProviderResult
-from aiswitch.router import PROVIDERS, get_available_providers, run_with_retry
+from claudex.models import ClaudexState, ErrorClass, Provider, ProviderState
+from claudex.providers.base import ProviderResult
+from claudex.router import PROVIDERS, get_available_providers, run_with_retry
 
 # ── Config fixture ────────────────────────────────────────────────────────────
 
@@ -51,21 +51,21 @@ def _mock_provider(result: ProviderResult) -> MagicMock:
 
 
 def test_available_both_ready():
-    state = AISwitchState()
+    state = ClaudexState()
     now = datetime.now(timezone.utc)
     available = get_available_providers(state, BASE_CONFIG, now=now)
     assert available == [Provider.CLAUDE, Provider.CODEX]
 
 
 def test_available_claude_in_cooldown():
-    state = AISwitchState()
+    state = ClaudexState()
     state.claude.cooldown_until = datetime.now(timezone.utc) + timedelta(hours=1)
     available = get_available_providers(state, BASE_CONFIG)
     assert available == [Provider.CODEX]
 
 
 def test_available_both_in_cooldown():
-    state = AISwitchState()
+    state = ClaudexState()
     future = datetime.now(timezone.utc) + timedelta(hours=1)
     state.claude.cooldown_until = future
     state.codex.cooldown_until = future
@@ -75,21 +75,21 @@ def test_available_both_in_cooldown():
 
 def test_available_cooldown_expired():
     """A provider whose cooldown has passed should be available again."""
-    state = AISwitchState()
+    state = ClaudexState()
     state.claude.cooldown_until = datetime.now(timezone.utc) - timedelta(seconds=1)
     available = get_available_providers(state, BASE_CONFIG)
     assert Provider.CLAUDE in available
 
 
 def test_available_respects_custom_order():
-    state = AISwitchState()
+    state = ClaudexState()
     config = dict(BASE_CONFIG, provider_order=["codex", "claude"])
     available = get_available_providers(state, config)
     assert available == [Provider.CODEX, Provider.CLAUDE]
 
 
 def test_available_ignores_unknown_provider_name():
-    state = AISwitchState()
+    state = ClaudexState()
     config = dict(BASE_CONFIG, provider_order=["claude", "gpt5", "codex"])
     available = get_available_providers(state, config)
     assert available == [Provider.CLAUDE, Provider.CODEX]
@@ -101,7 +101,7 @@ def test_available_ignores_unknown_provider_name():
 def test_success_on_first_try(isolated_dir):
     claude_mock = _mock_provider(_ok(text="hello from claude", session_id="c1"))
     with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: MagicMock()}):
-        result, provider, state = run_with_retry("hi", AISwitchState(), BASE_CONFIG)
+        result, provider, state = run_with_retry("hi", ClaudexState(), BASE_CONFIG)
 
     assert result.success is True
     assert result.text == "hello from claude"
@@ -114,7 +114,7 @@ def test_success_on_first_try(isolated_dir):
 def test_success_updates_session_id(isolated_dir):
     claude_mock = _mock_provider(_ok(session_id="new_session"))
     with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: MagicMock()}):
-        initial_state = AISwitchState()
+        initial_state = ClaudexState()
         initial_state.claude.session_id = "old_session"
         _, _, state = run_with_retry("hi", initial_state, BASE_CONFIG)
 
@@ -130,7 +130,7 @@ def test_failover_on_quota_exhausted(isolated_dir):
     codex_mock = _mock_provider(_ok(text="codex rescued you", session_id="t1"))
 
     with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: codex_mock}):
-        result, provider, state = run_with_retry("fix it", AISwitchState(), BASE_CONFIG)
+        result, provider, state = run_with_retry("fix it", ClaudexState(), BASE_CONFIG)
 
     assert result.success is True
     assert result.text == "codex rescued you"
@@ -153,7 +153,7 @@ def test_failover_injects_handoff_for_fallback_provider(isolated_dir):
     with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: codex_mock}):
         run_with_retry(
             "continue",
-            AISwitchState(),
+            ClaudexState(),
             BASE_CONFIG,
             handoff_content=handoff,
         )
@@ -171,7 +171,7 @@ def test_preferred_provider_gets_bare_prompt(isolated_dir):
     with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: MagicMock()}):
         run_with_retry(
             "hello",
-            AISwitchState(),
+            ClaudexState(),
             BASE_CONFIG,
             handoff_content="# some old handoff",
         )
@@ -196,7 +196,7 @@ def test_retry_on_transient_rate_limit_then_success(isolated_dir):
     ]
 
     with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: MagicMock()}):
-        result, provider, state = run_with_retry("hi", AISwitchState(), BASE_CONFIG)
+        result, provider, state = run_with_retry("hi", ClaudexState(), BASE_CONFIG)
 
     assert result.success is True
     assert claude_mock.run.call_count == 2
@@ -214,7 +214,7 @@ def test_exhausted_retries_switches_provider(isolated_dir):
     codex_mock = _mock_provider(_ok(text="codex steps in"))
 
     with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: codex_mock}):
-        result, provider, state = run_with_retry("hi", AISwitchState(), BASE_CONFIG)
+        result, provider, state = run_with_retry("hi", ClaudexState(), BASE_CONFIG)
 
     assert result.success is True
     assert provider == Provider.CODEX
@@ -229,7 +229,7 @@ def test_auth_error_surfaces_immediately(isolated_dir):
     claude_mock = _mock_provider(_err(ErrorClass.AUTH_REQUIRED))
 
     with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: MagicMock()}):
-        result, provider, state = run_with_retry("hi", AISwitchState(), BASE_CONFIG)
+        result, provider, state = run_with_retry("hi", ClaudexState(), BASE_CONFIG)
 
     assert result.success is False
     assert result.error_class == ErrorClass.AUTH_REQUIRED
@@ -242,7 +242,7 @@ def test_other_error_surfaces_immediately(isolated_dir):
     codex_mock = _mock_provider(_ok())
 
     with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: codex_mock}):
-        result, provider, state = run_with_retry("hi", AISwitchState(), BASE_CONFIG)
+        result, provider, state = run_with_retry("hi", ClaudexState(), BASE_CONFIG)
 
     assert result.success is False
     assert result.error_class == ErrorClass.OTHER_ERROR
@@ -255,7 +255,7 @@ def test_other_error_surfaces_immediately(isolated_dir):
 def test_all_providers_in_cooldown_returns_none(isolated_dir):
     """When all providers are in cooldown, result should be None."""
     future = datetime.now(timezone.utc) + timedelta(hours=1)
-    state = AISwitchState()
+    state = ClaudexState()
     state.claude.cooldown_until = future
     state.codex.cooldown_until = future
 

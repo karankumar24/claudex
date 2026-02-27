@@ -1,5 +1,5 @@
 """
-Low-level IO for the .aiswitch/ directory.
+Low-level IO for the .claudex/ directory.
 
 All paths are relative to the current working directory so the tool
 works correctly in any git repo without configuration.
@@ -12,47 +12,47 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .models import AISwitchState
+from .models import ClaudexState
 
 # ── Directory / file paths (relative to CWD) ─────────────────────────────────
 
-AISWITCH_DIR = Path(".aiswitch")
+AISWITCH_DIR = Path(".claudex")
 STATE_FILE = AISWITCH_DIR / "state.json"
 HANDOFF_FILE = AISWITCH_DIR / "handoff.md"
 TRANSCRIPT_FILE = AISWITCH_DIR / "transcript.ndjson"
 REPO_CONFIG_FILE = AISWITCH_DIR / "config.toml"
 
 # User-global config (lower priority than repo config)
-USER_CONFIG_FILE = Path.home() / ".config" / "aiswitch" / "config.toml"
+USER_CONFIG_FILE = Path.home() / ".config" / "claudex" / "config.toml"
 
 
 # ── Directory management ──────────────────────────────────────────────────────
 
 
 def ensure_dir() -> None:
-    """Create .aiswitch/ if it doesn't exist."""
+    """Create .claudex/ if it doesn't exist."""
     AISWITCH_DIR.mkdir(exist_ok=True)
 
 
 # ── State read/write ──────────────────────────────────────────────────────────
 
 
-def load_state() -> AISwitchState:
+def load_state() -> ClaudexState:
     """
-    Load state.json from .aiswitch/.
+    Load state.json from .claudex/.
     Returns a fresh default state if the file doesn't exist or is corrupt.
     """
     if not STATE_FILE.exists():
-        return AISwitchState()
+        return ClaudexState()
     try:
-        return AISwitchState.model_validate_json(STATE_FILE.read_text())
+        return ClaudexState.model_validate_json(STATE_FILE.read_text())
     except Exception:
         # Corrupt / schema-changed state — start fresh rather than crash
-        return AISwitchState()
+        return ClaudexState()
 
 
-def save_state(state: AISwitchState) -> None:
-    """Persist state to .aiswitch/state.json, updating the updated_at timestamp."""
+def save_state(state: ClaudexState) -> None:
+    """Persist state to .claudex/state.json, updating the updated_at timestamp."""
     ensure_dir()
     state.updated_at = datetime.now(timezone.utc)
     STATE_FILE.write_text(state.model_dump_json(indent=2))
@@ -92,8 +92,8 @@ def append_transcript(entry: dict) -> None:
 # ── Reset ─────────────────────────────────────────────────────────────────────
 
 
-def clear_aiswitch() -> None:
-    """Delete the entire .aiswitch/ directory (used by `aiswitch reset`)."""
+def clear_claudex() -> None:
+    """Delete the entire .claudex/ directory (used by `claudex reset`)."""
     import shutil
     if AISWITCH_DIR.exists():
         shutil.rmtree(AISWITCH_DIR)

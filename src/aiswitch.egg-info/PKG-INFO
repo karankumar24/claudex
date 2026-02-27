@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: aiswitch
-Version: 0.1.0
-Summary: Automatic failover between Claude Code CLI and Codex CLI with context continuity
-Requires-Python: >=3.11
-Description-Content-Type: text/markdown
-Requires-Dist: typer[all]>=0.12.0
-Requires-Dist: rich>=13.0.0
-Requires-Dist: pydantic>=2.0.0

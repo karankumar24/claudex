@@ -1,7 +1,7 @@
 """
 Append-only transcript logger.
 
-Each turn appends one JSON line to .aiswitch/transcript.ndjson containing:
+Each turn appends one JSON line to .claudex/transcript.ndjson containing:
   ts              — ISO-8601 UTC timestamp
   provider        — "claude" or "codex"
   user_prompt     — the original (un-augmented) user prompt

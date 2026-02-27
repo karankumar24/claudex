@@ -1,8 +1,8 @@
 """
 Configuration loading with layered precedence:
   1. Built-in defaults
-  2. User-global:  ~/.config/aiswitch/config.toml
-  3. Repo-local:   .aiswitch/config.toml  (highest priority)
+  2. User-global:  ~/.config/claudex/config.toml
+  3. Repo-local:   .claudex/config.toml  (highest priority)
 
 All config is read-only at runtime; create/edit the TOML files manually.
 """

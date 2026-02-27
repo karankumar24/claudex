@@ -4,7 +4,7 @@ Tests for truncation / line-limit utilities in handoff.py.
 
 import pytest
 
-from aiswitch.handoff import (
+from claudex.handoff import (
     _enforce_line_limit,
     _extract_section,
     _truncate,

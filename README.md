@@ -1,20 +1,20 @@
-# aiswitch
+# claudex
 
 Local developer tool that sits in front of `claude` (Claude Code CLI) and `codex` (Codex CLI) and **automatically fails over between them** when one hits a usage limit, with full context continuity so the receiving tool knows exactly what was happening.
 
 ## How it works
 
 ```
-you ──► aiswitch ──► claude   (preferred)
+you ──► claudex ──► claude   (preferred)
                        │ quota hit
                        ▼
                      codex    (fallback — receives handoff.md + git snapshot)
 ```
 
-On every successful turn, `aiswitch` writes:
-- `.aiswitch/state.json` — sessions, cooldowns, turn count
-- `.aiswitch/handoff.md` — rolling structured summary (goal / plan / last exchange / next steps)
-- `.aiswitch/transcript.ndjson` — append-only log of every turn
+On every successful turn, `claudex` writes:
+- `.claudex/state.json` — sessions, cooldowns, turn count
+- `.claudex/handoff.md` — rolling structured summary (goal / plan / last exchange / next steps)
+- `.claudex/transcript.ndjson` — append-only log of every turn
 
 When a failover happens, the new provider receives the handoff summary and a live git snapshot (status, log, diff) prepended to your prompt so it picks up without missing a beat.
 
@@ -22,10 +22,10 @@ When a failover happens, the new provider receives the handoff summary and a liv
 
 ```bash
 # From this repo — editable install works from any directory
-pip install -e /path/to/aiswitch
+pip install -e /path/to/claudex
 
 # Or with pipx for isolation
-pipx install -e /path/to/aiswitch
+pipx install -e /path/to/claudex
 ```
 
 Requires Python 3.11+ and both CLIs installed:
@@ -40,7 +40,7 @@ npm i -g @openai/codex               # installs `codex`
 
 ```bash
 cd your-git-repo
-aiswitch chat
+claudex chat
 ```
 
 ```
@@ -61,14 +61,14 @@ I can see from the handoff that we were refactoring auth…
 ### One-shot
 
 ```bash
-aiswitch ask "what does this function do?"
-aiswitch ask "fix the failing test in tests/test_auth.py"
+claudex ask "what does this function do?"
+claudex ask "fix the failing test in tests/test_auth.py"
 ```
 
 ### Check status
 
 ```bash
-aiswitch status
+claudex status
 ```
 
 ```
@@ -84,13 +84,13 @@ codex     ✗ cooldown thread_xyz…          2025-01-14 08:15   47 min
 ### Reset state
 
 ```bash
-aiswitch reset          # prompts for confirmation
-aiswitch reset --yes    # skip prompt
+claudex reset          # prompts for confirmation
+claudex reset --yes    # skip prompt
 ```
 
 ## Configuration
 
-Create `.aiswitch/config.toml` in your repo (or `~/.config/aiswitch/config.toml` for global defaults):
+Create `.claudex/config.toml` in your repo (or `~/.config/claudex/config.toml` for global defaults):
 
 ```toml
 # Provider preference order
@@ -119,7 +119,7 @@ cooldown_minutes = 60   # how long to cool down a QUOTA_EXHAUSTED provider
 
 ## Error handling
 
-| Error class | What triggers it | What aiswitch does |
+| Error class | What triggers it | What claudex does |
 |---|---|---|
 | `QUOTA_EXHAUSTED` | "usage limit reached" in output | Switch immediately, 60-min cooldown |
 | `TRANSIENT_RATE_LIMIT` | 429 / "rate limit" | Retry with backoff up to max_retries, then switch with 5-min cooldown |
@@ -129,10 +129,10 @@ cooldown_minutes = 60   # how long to cool down a QUOTA_EXHAUSTED provider
 ## Project structure
 
 ```
-src/aiswitch/
+src/claudex/
 ├── main.py         — typer CLI: chat / ask / status / reset
 ├── models.py       — pydantic models (Provider, ErrorClass, state)
-├── state.py        — .aiswitch/ IO (state.json, handoff.md, transcript)
+├── state.py        — .claudex/ IO (state.json, handoff.md, transcript)
 ├── config.py       — layered config loading (defaults → user → repo)
 ├── router.py       — routing loop, retry/backoff, failover (heavily commented)
 ├── handoff.py      — handoff.md generation + git snapshot
@@ -148,8 +148,8 @@ src/aiswitch/
 pytest tests/ -v
 ```
 
-## .aiswitch/ is safe to commit (or gitignore)
+## .claudex/ is safe to commit (or gitignore)
 
-- **No secrets** are ever written to `.aiswitch/` — no API keys, tokens, or credentials.
-- The transcript and handoff files may contain your prompt/response text, so add `.aiswitch/` to `.gitignore` if you prefer privacy.
+- **No secrets** are ever written to `.claudex/` — no API keys, tokens, or credentials.
+- The transcript and handoff files may contain your prompt/response text, so add `.claudex/` to `.gitignore` if you prefer privacy.
 - The state file only stores session IDs (opaque strings from the CLIs) and timestamps.
