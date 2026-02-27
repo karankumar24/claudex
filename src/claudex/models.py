@@ -1,4 +1,4 @@
-"""Pydantic models for aiswitch state."""
+"""Pydantic models for claudex state."""
 
 from __future__ import annotations
 
@@ -41,9 +41,9 @@ class ProviderState(BaseModel):
     consecutive_errors: int = 0
 
 
-class AISwitchState(BaseModel):
+class ClaudexState(BaseModel):
     """
-    Root state object serialized to .aiswitch/state.json.
+    Root state object serialized to .claudex/state.json.
     One file per repo (lives next to .git/).
     """
     last_provider: Optional[Provider] = None

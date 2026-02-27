@@ -2,7 +2,7 @@
 Handoff management and git snapshot generation.
 
 handoff.md is the primary mechanism for transferring context between providers.
-It lives at .aiswitch/handoff.md and is OVERWRITTEN each turn (not appended)
+It lives at .claudex/handoff.md and is OVERWRITTEN each turn (not appended)
 so it stays compact and under the configured line limit.
 
 When switching providers, the router prepends handoff.md content + a git
@@ -142,7 +142,7 @@ def update_handoff(
     prev_blockers = _extract_section(previous_handoff or "", "Open Questions / Blockers")
 
     content = f"""\
-# AI Switch Handoff
+# Claudex Handoff
 
 *Last updated: {now} — Provider: {provider}*
 

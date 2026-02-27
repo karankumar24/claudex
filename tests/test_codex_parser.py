@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from aiswitch.models import ErrorClass
-from aiswitch.providers.codex import CodexProvider
+from claudex.models import ErrorClass
+from claudex.providers.codex import CodexProvider
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 """
-Tests for state.py — read/write of .aiswitch/{state.json, handoff.md, transcript.ndjson}.
+Tests for state.py — read/write of .claudex/{state.json, handoff.md, transcript.ndjson}.
 """
 
 import json
@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from aiswitch.models import AISwitchState, Provider, ProviderState
-from aiswitch.state import (
+from claudex.models import ClaudexState, Provider, ProviderState
+from claudex.state import (
     append_transcript,
-    clear_aiswitch,
+    clear_claudex,
     load_handoff,
     load_state,
     save_handoff,
@@ -23,14 +23,14 @@ from aiswitch.state import (
 
 def test_load_state_returns_default_when_file_missing(isolated_dir):
     state = load_state()
-    assert isinstance(state, AISwitchState)
+    assert isinstance(state, ClaudexState)
     assert state.last_provider is None
     assert state.turn_count == 0
     assert state.claude.session_id is None
 
 
 def test_save_and_load_state_roundtrip(isolated_dir):
-    state = AISwitchState(last_provider=Provider.CLAUDE, turn_count=7)
+    state = ClaudexState(last_provider=Provider.CLAUDE, turn_count=7)
     state.claude = ProviderState(session_id="sess_abc")
     state.codex = ProviderState(session_id="thread_xyz", consecutive_errors=2)
 
@@ -44,25 +44,25 @@ def test_save_and_load_state_roundtrip(isolated_dir):
     assert loaded.codex.consecutive_errors == 2
 
 
-def test_save_state_creates_aiswitch_dir(isolated_dir):
-    assert not (isolated_dir / ".aiswitch").exists()
-    save_state(AISwitchState())
-    assert (isolated_dir / ".aiswitch" / "state.json").exists()
+def test_save_state_creates_claudex_dir(isolated_dir):
+    assert not (isolated_dir / ".claudex").exists()
+    save_state(ClaudexState())
+    assert (isolated_dir / ".claudex" / "state.json").exists()
 
 
 def test_load_state_survives_corrupt_json(isolated_dir):
-    (isolated_dir / ".aiswitch").mkdir()
-    (isolated_dir / ".aiswitch" / "state.json").write_text("{ broken json %%%")
+    (isolated_dir / ".claudex").mkdir()
+    (isolated_dir / ".claudex" / "state.json").write_text("{ broken json %%%")
 
     state = load_state()  # Should not raise
-    assert isinstance(state, AISwitchState)
+    assert isinstance(state, ClaudexState)
     assert state.turn_count == 0
 
 
 def test_save_state_updates_updated_at(isolated_dir):
     from datetime import datetime, timezone
     before = datetime.now(timezone.utc)
-    save_state(AISwitchState())
+    save_state(ClaudexState())
     loaded = load_state()
     assert loaded.updated_at >= before
 
@@ -94,7 +94,7 @@ def test_append_transcript_creates_ndjson(isolated_dir):
     append_transcript({"provider": "claude", "user_prompt": "hello", "ts": "t1"})
     append_transcript({"provider": "codex", "user_prompt": "world", "ts": "t2"})
 
-    path = isolated_dir / ".aiswitch" / "transcript.ndjson"
+    path = isolated_dir / ".claudex" / "transcript.ndjson"
     lines = path.read_text().strip().splitlines()
     assert len(lines) == 2
 
@@ -110,23 +110,23 @@ def test_append_transcript_is_append_only(isolated_dir):
     for i in range(5):
         append_transcript({"i": i})
 
-    path = isolated_dir / ".aiswitch" / "transcript.ndjson"
+    path = isolated_dir / ".claudex" / "transcript.ndjson"
     lines = path.read_text().strip().splitlines()
     assert len(lines) == 5
     assert json.loads(lines[4])["i"] == 4
 
 
-# ── clear_aiswitch ────────────────────────────────────────────────────────────
+# ── clear_claudex ────────────────────────────────────────────────────────────
 
 
-def test_clear_aiswitch_removes_directory(isolated_dir):
-    save_state(AISwitchState())
+def test_clear_claudex_removes_directory(isolated_dir):
+    save_state(ClaudexState())
     save_handoff("something")
-    assert (isolated_dir / ".aiswitch").exists()
+    assert (isolated_dir / ".claudex").exists()
 
-    clear_aiswitch()
-    assert not (isolated_dir / ".aiswitch").exists()
+    clear_claudex()
+    assert not (isolated_dir / ".claudex").exists()
 
 
-def test_clear_aiswitch_is_safe_when_missing(isolated_dir):
-    clear_aiswitch()  # Should not raise
+def test_clear_claudex_is_safe_when_missing(isolated_dir):
+    clear_claudex()  # Should not raise

@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "aiswitch"
+name = "claudex"
 version = "0.1.0"
 description = "Automatic failover between Claude Code CLI and Codex CLI with context continuity"
 readme = "README.md"
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-aiswitch = "aiswitch.main:main"
+claudex = "claudex.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

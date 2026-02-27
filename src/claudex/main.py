@@ -1,12 +1,12 @@
 """
-aiswitch CLI entry point.
+claudex CLI entry point.
 
 Commands
 --------
-  aiswitch chat           — interactive REPL loop
-  aiswitch ask "<prompt>" — single-turn one-shot mode
-  aiswitch status         — show provider state, sessions, cooldowns
-  aiswitch reset          — clear .aiswitch/ for the current repo
+  claudex chat           — interactive REPL loop
+  claudex ask "<prompt>" — single-turn one-shot mode
+  claudex status         — show provider state, sessions, cooldowns
+  claudex reset          — clear .claudex/ for the current repo
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from .models import Provider
 from .router import get_available_providers, run_with_retry
 from .state import (
     AISWITCH_DIR,
-    clear_aiswitch,
+    clear_claudex,
     load_handoff,
     load_state,
     save_handoff,
@@ -37,7 +37,7 @@ from .transcript import record_turn
 # ── Typer app ─────────────────────────────────────────────────────────────────
 
 app = typer.Typer(
-    name="aiswitch",
+    name="claudex",
     help="Automatic failover between Claude Code CLI and Codex CLI.",
     no_args_is_help=True,
     add_completion=False,
@@ -78,7 +78,7 @@ def _run_turn(user_prompt: str, config: dict) -> tuple[bool, Optional[Provider]]
     if result is None:
         err_console.print(
             "\n[bold red]✗ All providers are in cooldown.[/bold red] "
-            "Run [bold]aiswitch status[/bold] to see timers.\n"
+            "Run [bold]claudex status[/bold] to see timers.\n"
         )
         return False, None
 
@@ -153,9 +153,9 @@ def chat() -> None:
 
     console.print(
         Panel(
-            "[bold green]aiswitch chat[/bold green]  "
+            "[bold green]claudex chat[/bold green]  "
             "[dim]Ctrl-C or 'exit' to quit[/dim]",
-            title="AI Switch",
+            title="Claudex",
             expand=False,
         )
     )
@@ -251,23 +251,23 @@ def reset(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     """
-    Delete all .aiswitch/ state for the current repository.
+    Delete all .claudex/ state for the current repository.
     This clears sessions, handoff context, and the transcript log.
     """
     if not AISWITCH_DIR.exists():
-        console.print("[dim]Nothing to reset — .aiswitch/ does not exist.[/dim]")
+        console.print("[dim]Nothing to reset — .claudex/ does not exist.[/dim]")
         return
 
     if not yes:
         confirmed = typer.confirm(
-            "Delete all .aiswitch/ state (sessions, handoff, transcript)?"
+            "Delete all .claudex/ state (sessions, handoff, transcript)?"
         )
         if not confirmed:
             console.print("[dim]Aborted.[/dim]")
             raise typer.Exit(0)
 
-    clear_aiswitch()
-    console.print("[green]✓[/green] Cleared .aiswitch/ for this repository.")
+    clear_claudex()
+    console.print("[green]✓[/green] Cleared .claudex/ for this repository.")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

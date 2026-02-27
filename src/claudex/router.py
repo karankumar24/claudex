@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 from .handoff import build_provider_prompt
-from .models import AISwitchState, ErrorClass, Provider, ProviderState
+from .models import ClaudexState, ErrorClass, Provider, ProviderState
 from .providers.base import BaseProvider, ProviderResult
 from .providers.claude import ClaudeProvider
 from .providers.codex import CodexProvider
@@ -44,7 +44,7 @@ PROVIDERS: dict[Provider, BaseProvider] = {
 
 
 def get_available_providers(
-    state: AISwitchState,
+    state: ClaudexState,
     config: dict,
     now: Optional[datetime] = None,
 ) -> list[Provider]:
@@ -54,7 +54,7 @@ def get_available_providers(
     Parameters
     ----------
     state:
-        Current AISwitchState (read-only here).
+        Current ClaudexState (read-only here).
     config:
         Merged config dict.
     now:
@@ -86,10 +86,10 @@ def get_available_providers(
 
 def run_with_retry(
     user_prompt: str,
-    state: AISwitchState,
+    state: ClaudexState,
     config: dict,
     handoff_content: Optional[str] = None,
-) -> Tuple[Optional[ProviderResult], Optional[Provider], AISwitchState]:
+) -> Tuple[Optional[ProviderResult], Optional[Provider], ClaudexState]:
     """
     Execute a single user prompt against the best available provider,
     handling retries and failover transparently.
@@ -99,7 +99,7 @@ def run_with_retry(
     user_prompt:
         The raw user prompt (without any handoff context prepended).
     state:
-        Current AISwitchState; returned mutated on success/failure.
+        Current ClaudexState; returned mutated on success/failure.
     config:
         Merged config dict (from load_config()).
     handoff_content:
