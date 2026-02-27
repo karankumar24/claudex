@@ -8,6 +8,7 @@ from claudex.handoff import (
     _enforce_line_limit,
     _extract_section,
     _truncate,
+    get_repo_snapshot,
     update_handoff,
 )
 
@@ -172,3 +173,53 @@ def test_update_handoff_respects_line_limit():
         config=config,
     )
     assert len(result.splitlines()) <= 23  # 20 + 3 omission marker lines
+
+
+# ── get_repo_snapshot ─────────────────────────────────────────────────────────
+
+
+def test_get_repo_snapshot_skips_full_diff_when_numstat_exceeds_limit(monkeypatch):
+    calls: list[tuple[str, ...]] = []
+    outputs = {
+        ("git", "rev-parse", "--is-inside-work-tree"): "true\n",
+        ("git", "status", "--porcelain"): "",
+        ("git", "log", "-n", "5", "--oneline"): "",
+        ("git", "diff", "--stat"): " big.py | 250 ++++++++++++++++++++++++++\n",
+        ("git", "diff", "--numstat"): "250\t0\tbig.py\n",
+    }
+
+    def fake_run_git(cmd: list[str]) -> str:
+        key = tuple(cmd)
+        calls.append(key)
+        return outputs.get(key, "")
+
+    monkeypatch.setattr("claudex.handoff._run_git", fake_run_git)
+
+    snapshot = get_repo_snapshot({"limits": {"max_diff_lines": 200, "max_diff_bytes": 8000}})
+
+    assert "Full diff omitted" in snapshot
+    assert ("git", "diff") not in calls
+
+
+def test_get_repo_snapshot_includes_full_diff_when_under_limits(monkeypatch):
+    calls: list[tuple[str, ...]] = []
+    outputs = {
+        ("git", "rev-parse", "--is-inside-work-tree"): "true\n",
+        ("git", "status", "--porcelain"): "M src/app.py\n",
+        ("git", "log", "-n", "5", "--oneline"): "abc123 first commit\n",
+        ("git", "diff", "--stat"): " src/app.py | 2 +-\n",
+        ("git", "diff", "--numstat"): "1\t1\tsrc/app.py\n",
+        ("git", "diff"): "--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-old\n+new\n",
+    }
+
+    def fake_run_git(cmd: list[str]) -> str:
+        key = tuple(cmd)
+        calls.append(key)
+        return outputs.get(key, "")
+
+    monkeypatch.setattr("claudex.handoff._run_git", fake_run_git)
+
+    snapshot = get_repo_snapshot({"limits": {"max_diff_lines": 200, "max_diff_bytes": 8000}})
+
+    assert "**Full diff:**" in snapshot
+    assert ("git", "diff") in calls

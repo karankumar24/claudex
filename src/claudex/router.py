@@ -117,6 +117,9 @@ def run_with_retry(
     backoff_base: float = retry_cfg.get("backoff_base", 2.0)
     backoff_max: float = retry_cfg.get("backoff_max", 30.0)
     cooldown_minutes: int = retry_cfg.get("cooldown_minutes", 60)
+    transient_cooldown_minutes: int = retry_cfg.get(
+        "transient_cooldown_minutes", 5
+    )
 
     available = get_available_providers(state, config)
     if not available:
@@ -188,7 +191,7 @@ def run_with_retry(
                 else:
                     # Exhausted retries — short cooldown, try next provider
                     ps.cooldown_until = datetime.now(timezone.utc) + timedelta(
-                        minutes=5
+                        minutes=transient_cooldown_minutes
                     )
                     state.set_provider_state(provider, ps)
                     break

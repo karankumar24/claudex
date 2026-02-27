@@ -43,23 +43,28 @@ class CodexProvider(BaseProvider):
         codex_cfg = config.get("codex", {})
         cmd = ["codex", "exec"]
 
+        model = codex_cfg.get("model")
+        if model:
+            cmd.extend(["--model", model])
+
+        # Valid codex exec modes:
+        #   --sandbox {read-only|workspace-write|danger-full-access}
+        #   --full-auto
+        #   --dangerously-bypass-approvals-and-sandbox
+        sandbox = codex_cfg.get("sandbox", "read-only")
+        if sandbox in {"read-only", "workspace-write", "danger-full-access"}:
+            cmd.extend(["--sandbox", sandbox])
+        elif sandbox == "full-auto":
+            cmd.append("--full-auto")
+        elif sandbox == "dangerously-bypass-approvals-and-sandbox":
+            cmd.append("--dangerously-bypass-approvals-and-sandbox")
+        else:
+            # Invalid values fall back to read-only for safety.
+            cmd.extend(["--sandbox", "read-only"])
+
         if session_id:
             # Resume an existing session
             cmd.extend(["resume", session_id])
-        else:
-            # New session — apply model / sandbox / approval flags
-            model = codex_cfg.get("model")
-            if model:
-                cmd.extend(["--model", model])
-
-            # Safety default: never run destructive sandbox unless user opts in
-            sandbox = codex_cfg.get("sandbox", "read-only")
-            if sandbox == "full-auto":
-                cmd.append("--dangerously-auto-approve-everything")
-            # Approval mode (e.g. "auto-edit", "suggest")
-            approvals = codex_cfg.get("approvals")
-            if approvals:
-                cmd.extend(["--approval-mode", approvals])
 
         # --json flag tells codex to emit JSONL events
         cmd.append("--json")

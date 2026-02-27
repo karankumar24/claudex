@@ -6,7 +6,8 @@ Wraps the `claude` command-line tool installed via `npm i -g @anthropic-ai/claud
 New session:    claude -p "<prompt>" --output-format json
 Resume session: claude -r <session_id> -p "<prompt>" --output-format json
 
-Output format (--output-format json) returns a single JSON object:
+Output format (--output-format json) returns a JSON ARRAY of message objects.
+We scan for the item with "type": "result" which has:
   {
     "type": "result",
     "result": "<assistant response text>",
@@ -112,20 +113,34 @@ class ClaudeProvider(BaseProvider):
     ) -> ProviderResult:
         stdout = (proc.stdout or "").strip()
 
-        # Try JSON parse first (the happy path with --output-format json)
-        parsed: Optional[dict] = None
+        # Try JSON parse first (the happy path with --output-format json).
+        # Claude returns a JSON ARRAY; find the {"type": "result"} item within it.
+        result_obj: Optional[dict] = None
         if stdout:
             try:
                 parsed = json.loads(stdout)
+                if isinstance(parsed, list):
+                    result_obj = next(
+                        (
+                            o
+                            for o in parsed
+                            if isinstance(o, dict) and o.get("type") == "result"
+                        ),
+                        None,
+                    )
+                elif isinstance(parsed, dict):
+                    # Future-proof: accept bare result objects from older/newer formats.
+                    if parsed.get("type") == "result" or "result" in parsed:
+                        result_obj = parsed
             except json.JSONDecodeError:
                 pass
 
-        if parsed is not None:
-            is_error = parsed.get("is_error", False)
-            text = parsed.get("result", "")
-            session_id = parsed.get("session_id")
+        if result_obj is not None:
+            is_error = result_obj.get("is_error", False)
+            text = result_obj.get("result", "")
+            session_id = result_obj.get("session_id")
 
-            if not is_error and text:
+            if not is_error:
                 return ProviderResult(
                     success=True,
                     text=text,

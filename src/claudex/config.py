@@ -10,7 +10,6 @@ All config is read-only at runtime; create/edit the TOML files manually.
 from __future__ import annotations
 
 import tomllib
-from pathlib import Path
 from typing import Any
 
 from .state import REPO_CONFIG_FILE, USER_CONFIG_FILE
@@ -24,10 +23,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "codex": {
         # None means use codex's own default model
         "model": None,
-        # "read-only" is the safe default; set "full-auto" to unleash codex sandbox
+        # "read-only" is safest; other valid values:
+        #   "workspace-write", "danger-full-access", "full-auto"
         "sandbox": "read-only",
-        # approval mode passed as --approval-mode; None = omit the flag
-        "approvals": None,
     },
 
     "claude": {
@@ -53,6 +51,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "backoff_max": 30.0,
         # How long (minutes) to cool down a QUOTA_EXHAUSTED provider
         "cooldown_minutes": 60,
+        # How long (minutes) to cool down after exhausted transient retries
+        "transient_cooldown_minutes": 5,
     },
 }
 
@@ -71,6 +71,19 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+def _load_toml_file(path) -> dict[str, Any]:
+    """
+    Load a TOML file into a dict.
+    Returns {} if the file cannot be read or parsed.
+    """
+    try:
+        with path.open("rb") as f:
+            loaded = tomllib.load(f)
+            return loaded if isinstance(loaded, dict) else {}
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
 def load_config() -> dict[str, Any]:
     """
     Return the merged configuration dict.
@@ -80,14 +93,12 @@ def load_config() -> dict[str, Any]:
 
     # User-global config (lower priority)
     if USER_CONFIG_FILE.exists():
-        with USER_CONFIG_FILE.open("rb") as f:
-            user_cfg = tomllib.load(f)
+        user_cfg = _load_toml_file(USER_CONFIG_FILE)
         config = _deep_merge(config, user_cfg)
 
     # Repo-local config (highest priority)
     if REPO_CONFIG_FILE.exists():
-        with REPO_CONFIG_FILE.open("rb") as f:
-            repo_cfg = tomllib.load(f)
+        repo_cfg = _load_toml_file(REPO_CONFIG_FILE)
         config = _deep_merge(config, repo_cfg)
 
     return config
