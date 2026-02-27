@@ -72,3 +72,21 @@ def test_parse_bare_result_object_is_supported():
     assert result.success is True
     assert result.text == "Legacy format"
     assert result.session_id == "sess_legacy"
+
+
+def test_parse_error_subtype_with_empty_result_is_failure():
+    stdout = json.dumps(
+        {
+            "type": "result",
+            "subtype": "error_during_execution",
+            "result": "",
+            "session_id": "sess_err",
+            "is_error": False,
+            "errors": ["EPERM: operation not permitted"],
+        }
+    )
+
+    result = PROVIDER._parse(_proc(stdout), stdout)
+    assert result.success is False
+    assert result.error_class == ErrorClass.OTHER_ERROR
+    assert result.session_id == "sess_err"
