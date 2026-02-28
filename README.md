@@ -1,6 +1,10 @@
 # claudex
 
-Local developer tool that sits in front of `claude` (Claude Code CLI) and `codex` (Codex CLI) and **automatically fails over between them** when one hits a usage limit, with full context continuity so the receiving tool knows exactly what was happening.
+I built claudex for a very practical reason. I use the regular $20 Claude Code and $20 Codex plans, and paying for max plans on both is just not realistic for me right now. So when one tool hits its limit, I switch to the other and keep working.
+
+That worked, but the context switching got old fast. I kept repeating the same task background, goals, and file context again and again. This project is my fix for that.
+
+claudex sits in front of `claude` (Claude Code CLI) and `codex` (Codex CLI), tracks session state, and hands off cleanly when a switch is needed. You stay in flow instead of restarting your train of thought every time.
 
 ## How it works
 
@@ -8,13 +12,13 @@ Local developer tool that sits in front of `claude` (Claude Code CLI) and `codex
 you ──► claudex ──► claude   (preferred)
                        │ quota hit
                        ▼
-                     codex    (fallback — receives handoff.md + git snapshot)
+                     codex    (fallback, receives handoff.md + git snapshot)
 ```
 
 On every successful turn, `claudex` writes:
-- `.claudex/state.json` — sessions, cooldowns, turn count
-- `.claudex/handoff.md` — rolling structured summary (goal / plan / last exchange / next steps)
-- `.claudex/transcript.ndjson` — append-only log of every turn
+- `.claudex/state.json`, sessions, cooldowns, turn count
+- `.claudex/handoff.md`, rolling structured summary (goal / plan / last exchange / next steps)
+- `.claudex/transcript.ndjson`, append only log of every turn
 
 When a failover happens, the new provider receives the handoff summary and a live git snapshot (status, log, diff) prepended to your prompt so it picks up without missing a beat.
 Fallback attempts always start a fresh session on the fallback provider to avoid stale cross-task thread contamination.
@@ -22,7 +26,7 @@ Fallback attempts always start a fresh session on the fallback provider to avoid
 ## Install
 
 ```bash
-# From this repo — editable install works from any directory
+# From this repo, editable install works from any directory
 pip install -e /path/to/claudex
 
 # Or with pipx for isolation
@@ -93,24 +97,30 @@ claudex reset          # prompts for confirmation
 claudex reset --yes    # skip prompt
 ```
 
-### Invisible wrappers (codex / claudecode)
+### Invisible wrappers (claude / claudecode / codex)
 
-Install wrapper launchers so starting `codex` or `claudecode` automatically
+Install wrapper launchers so starting `claude`, `claudecode`, or `codex` automatically
 runs through claudex with failover + continuity:
 
 ```bash
 claudex install-wrappers
 ```
 
-Wrappers installed:
-- `codex` -> `claudex chat/ask --prefer-provider codex`
-- `claudecode` -> `claudex chat/ask --prefer-provider claude`
-
-Set fallback policy for wrappers with environment variable:
+By default wrappers are installed to `~/.claudex/bin`.
+Add it to your shell PATH before other CLI bins:
 
 ```bash
-export CLAUDEX_AUTO_SWITCH=ask   # ask | yes | no
+export PATH="$HOME/.claudex/bin:$PATH"
 ```
+
+Wrappers installed:
+- `claude` -> `claudex launch --prefer-provider claude -- "$@"`
+- `claudecode` -> `claudex launch --prefer-provider claude -- "$@"`
+- `codex` -> `claudex launch --prefer-provider codex -- "$@"`
+
+Wrapper mode is transparent (native CLI is exec'd directly after provider selection):
+- claudex chooses provider and prints only a one-line switch notice when needed
+- then it launches the native `codex`/`claude` UI directly (full native progress output)
 
 Remove wrappers:
 

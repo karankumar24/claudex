@@ -21,6 +21,7 @@ We scan for the item with "type": "result" which has:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from typing import Optional
 
@@ -83,12 +84,11 @@ class ClaudeProvider(BaseProvider):
             cmd.extend(["--allowedTools", tool])
 
         try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=300,  # 5-minute hard limit per turn
-            )
+            env = os.environ.copy()
+            # If user installs a `claude` wrapper that routes through claudex,
+            # mark provider-internal calls so wrappers can bypass recursion.
+            env["CLAUDEX_INNER_PROVIDER_CALL"] = "1"
+            proc = self._run_subprocess(cmd, env)
         except subprocess.TimeoutExpired:
             return ProviderResult(
                 success=False,
@@ -96,17 +96,36 @@ class ClaudeProvider(BaseProvider):
                 error_message="Claude CLI timed out after 5 minutes.",
             )
         except FileNotFoundError:
-            return ProviderResult(
-                success=False,
-                error_class=ErrorClass.OTHER_ERROR,
-                error_message=(
-                    "'claude' command not found. "
-                    "Install with: npm i -g @anthropic-ai/claude-code"
-                ),
-            )
+            alt_cmd = ["claudecode", *cmd[1:]]
+            try:
+                proc = self._run_subprocess(alt_cmd, env)
+            except subprocess.TimeoutExpired:
+                return ProviderResult(
+                    success=False,
+                    error_class=ErrorClass.OTHER_ERROR,
+                    error_message="Claude CLI timed out after 5 minutes.",
+                )
+            except FileNotFoundError:
+                return ProviderResult(
+                    success=False,
+                    error_class=ErrorClass.OTHER_ERROR,
+                    error_message=(
+                        "'claude'/'claudecode' command not found. "
+                        "Install with: npm i -g @anthropic-ai/claude-code"
+                    ),
+                )
 
         raw = (proc.stdout or "") + (proc.stderr or "")
         return self._parse(proc, raw)
+
+    def _run_subprocess(self, cmd: list[str], env: dict[str, str]) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5-minute hard limit per turn
+            env=env,
+        )
 
     # ── Parsing ───────────────────────────────────────────────────────────────
 
