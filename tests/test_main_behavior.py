@@ -25,16 +25,17 @@ def test_coerce_auto_switch_aliases():
 
 
 def test_wrapper_script_prefers_requested_provider():
-    codex_script = _wrapper_script(Provider.CODEX)
+    codex_script = _wrapper_script(Provider.CODEX, real_codex_bin="/usr/local/bin/codex")
     claude_script = _wrapper_script(Provider.CLAUDE)
 
     assert "--prefer-provider codex" in codex_script
     assert "--prefer-provider claude" in claude_script
     assert "claudex chat" in codex_script
     assert "claudex ask" in codex_script
+    assert "CLAUDEX_INNER_PROVIDER_CALL" in codex_script
 
 
 def test_write_wrapper_marks_file_as_claudex_wrapper(isolated_dir):
     path = isolated_dir / "bin" / "codex"
-    _write_wrapper(path, _wrapper_script(Provider.CODEX))
+    _write_wrapper(path, _wrapper_script(Provider.CODEX, real_codex_bin="/usr/local/bin/codex"))
     assert _is_claudex_wrapper(path) is True
