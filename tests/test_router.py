@@ -209,6 +209,53 @@ def test_failover_uses_fresh_fallback_session(isolated_dir):
     assert call_args[1]["session_id"] is None
 
 
+def test_failover_can_be_denied_by_confirmation_callback(isolated_dir):
+    claude_fail = ProviderResult(
+        success=False,
+        error_class=ErrorClass.QUOTA_EXHAUSTED,
+        error_message="limit",
+    )
+    claude_mock = _mock_provider(claude_fail)
+    codex_mock = _mock_provider(_ok(text="should not run"))
+
+    def deny_switch(_from, _to, _result):
+        return False
+
+    with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: codex_mock}):
+        result, provider, _ = run_with_retry(
+            "continue",
+            ClaudexState(),
+            BASE_CONFIG,
+            confirm_switch=deny_switch,
+        )
+
+    assert provider == Provider.CLAUDE
+    assert result.success is False
+    codex_mock.run.assert_not_called()
+
+
+def test_failover_confirmation_callback_receives_provider_pair(isolated_dir):
+    claude_mock = _mock_provider(_err(ErrorClass.QUOTA_EXHAUSTED))
+    codex_mock = _mock_provider(_ok(text="fallback ok"))
+    calls: list[tuple[Provider, Provider]] = []
+
+    def approve_switch(from_provider, to_provider, _result):
+        calls.append((from_provider, to_provider))
+        return True
+
+    with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: codex_mock}):
+        result, provider, _ = run_with_retry(
+            "continue",
+            ClaudexState(),
+            BASE_CONFIG,
+            confirm_switch=approve_switch,
+        )
+
+    assert result.success is True
+    assert provider == Provider.CODEX
+    assert calls == [(Provider.CLAUDE, Provider.CODEX)]
+
+
 def test_preferred_provider_gets_bare_prompt(isolated_dir):
     """The first (preferred) provider should get the original prompt, not augmented."""
     claude_mock = _mock_provider(_ok())

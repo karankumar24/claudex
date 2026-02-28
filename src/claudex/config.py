@@ -54,6 +54,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # How long (minutes) to cool down after exhausted transient retries
         "transient_cooldown_minutes": 5,
     },
+
+    "switch": {
+        # ask | yes | no
+        # - ask: prompt before failover
+        # - yes: auto-approve failover
+        # - no: never switch automatically
+        "confirmation": "ask",
+    },
 }
 
 

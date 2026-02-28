@@ -10,9 +10,12 @@ import pytest
 from claudex.models import ClaudexState, Provider, ProviderState
 from claudex.state import (
     append_transcript,
+    clear_active_run,
     clear_claudex,
     load_handoff,
+    load_active_run,
     load_state,
+    save_active_run,
     save_handoff,
     save_state,
 )
@@ -144,6 +147,33 @@ def test_append_transcript_is_append_only(isolated_dir):
     lines = path.read_text().strip().splitlines()
     assert len(lines) == 5
     assert json.loads(lines[4])["i"] == 4
+
+
+# ── active run metadata ───────────────────────────────────────────────────────
+
+
+def test_save_and_load_active_run_roundtrip(isolated_dir):
+    save_active_run(
+        {
+            "pid": 12345,
+            "mode": "ask",
+            "provider": "codex",
+            "started_at": "2026-02-28T00:00:00+00:00",
+            "prompt_excerpt": "hello",
+        }
+    )
+
+    loaded = load_active_run()
+    assert loaded is not None
+    assert loaded["pid"] == 12345
+    assert loaded["provider"] == "codex"
+
+
+def test_clear_active_run_removes_file(isolated_dir):
+    save_active_run({"pid": 1})
+    assert load_active_run() is not None
+    clear_active_run()
+    assert load_active_run() is None
 
 
 # ── clear_claudex ────────────────────────────────────────────────────────────
