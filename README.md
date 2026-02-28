@@ -17,6 +17,7 @@ On every successful turn, `claudex` writes:
 - `.claudex/transcript.ndjson` — append-only log of every turn
 
 When a failover happens, the new provider receives the handoff summary and a live git snapshot (status, log, diff) prepended to your prompt so it picks up without missing a beat.
+Fallback attempts always start a fresh session on the fallback provider to avoid stale cross-task thread contamination.
 
 ## Install
 
@@ -76,9 +77,9 @@ Last provider:   claude
 Available:       claude, codex
 Total turns:     12
 
-Provider  Status     Session ID            Last Used          Cooldown
-claude    ✓ ready    sess_01abc…           2025-01-14 09:32   —
-codex     ✗ cooldown thread_xyz…          2025-01-14 08:15   47 min
+Provider  Status     Session ID   Last Used          Cooldown  Cooldown Until                         Cooldown Source
+claude    ✓ ready    sess_01abc…  2025-01-14 09:32   —         —                                      —
+codex     ✗ cooldown thread_xyz…  2025-01-14 08:15   47 min    2025-01-14 10:02 UTC / 2025-01-14 02:02 PST  quota_reset_time
 ```
 
 ### Reset state
@@ -113,7 +114,7 @@ max_handoff_lines = 350 # rolling handoff.md size cap
 max_retries = 3         # TRANSIENT_RATE_LIMIT retries before switching
 backoff_base = 2.0      # exponential backoff base (seconds)
 backoff_max = 30.0      # max single wait
-cooldown_minutes = 60   # how long to cool down a QUOTA_EXHAUSTED provider
+cooldown_minutes = 60   # fallback cooldown for QUOTA_EXHAUSTED when reset time is unavailable
 transient_cooldown_minutes = 5 # cooldown after exhausted transient retries
 ```
 
@@ -121,7 +122,7 @@ transient_cooldown_minutes = 5 # cooldown after exhausted transient retries
 
 | Error class | What triggers it | What claudex does |
 |---|---|---|
-| `QUOTA_EXHAUSTED` | "usage limit reached" in output | Switch immediately, 60-min cooldown |
+| `QUOTA_EXHAUSTED` | "usage limit reached" in output | Switch immediately; use provider reset time when present, else fallback cooldown_minutes |
 | `TRANSIENT_RATE_LIMIT` | 429 / "rate limit" | Retry with backoff up to max_retries, then switch with transient cooldown |
 | `AUTH_REQUIRED` | 401 / "not authenticated" | Surface error and stop — you need to re-auth |
 | `OTHER_ERROR` | CLI crash, parse failure | Surface error and stop |
@@ -152,4 +153,4 @@ pytest tests/ -v
 
 - **No secrets** are ever written to `.claudex/` — no API keys, tokens, or credentials.
 - The transcript and handoff files may contain your prompt/response text, so add `.claudex/` to `.gitignore` if you prefer privacy.
-- The state file only stores session IDs (opaque strings from the CLIs) and timestamps.
+- The state file stores session IDs, cooldown timestamps, and cooldown source metadata (for debugging failover decisions).

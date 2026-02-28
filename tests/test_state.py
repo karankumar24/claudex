@@ -33,6 +33,8 @@ def test_save_and_load_state_roundtrip(isolated_dir):
     state = ClaudexState(last_provider=Provider.CLAUDE, turn_count=7)
     state.claude = ProviderState(session_id="sess_abc")
     state.codex = ProviderState(session_id="thread_xyz", consecutive_errors=2)
+    state.claude.cooldown_source = "quota_default"
+    state.claude.cooldown_reason = "quota-exhausted:default-cooldown"
 
     save_state(state)
 
@@ -40,6 +42,8 @@ def test_save_and_load_state_roundtrip(isolated_dir):
     assert loaded.last_provider == Provider.CLAUDE
     assert loaded.turn_count == 7
     assert loaded.claude.session_id == "sess_abc"
+    assert loaded.claude.cooldown_source == "quota_default"
+    assert loaded.claude.cooldown_reason == "quota-exhausted:default-cooldown"
     assert loaded.codex.session_id == "thread_xyz"
     assert loaded.codex.consecutive_errors == 2
 
@@ -57,6 +61,32 @@ def test_load_state_survives_corrupt_json(isolated_dir):
     state = load_state()  # Should not raise
     assert isinstance(state, ClaudexState)
     assert state.turn_count == 0
+
+
+def test_load_state_old_schema_defaults_new_cooldown_metadata(isolated_dir):
+    (isolated_dir / ".claudex").mkdir()
+    old_schema = {
+        "last_provider": "claude",
+        "claude": {
+            "session_id": "sess_old",
+            "last_used": None,
+            "cooldown_until": None,
+            "consecutive_errors": 0,
+        },
+        "codex": {
+            "session_id": None,
+            "last_used": None,
+            "cooldown_until": None,
+            "consecutive_errors": 0,
+        },
+        "turn_count": 1,
+    }
+    (isolated_dir / ".claudex" / "state.json").write_text(json.dumps(old_schema))
+
+    loaded = load_state()
+    assert loaded.claude.session_id == "sess_old"
+    assert loaded.claude.cooldown_source is None
+    assert loaded.claude.cooldown_reason is None
 
 
 def test_save_state_updates_updated_at(isolated_dir):

@@ -145,6 +145,19 @@ def test_parse_transient_rate_limit():
     assert result.error_class == ErrorClass.TRANSIENT_RATE_LIMIT
 
 
+def test_parse_quota_hit_your_limit_error():
+    stdout = _jsonl(
+        {
+            "type": "error",
+            "message": "You've hit your limit · resets 6pm (America/Los_Angeles)",
+            "status": 429,
+        },
+    )
+    result = PROVIDER._parse_jsonl(_proc(stdout, returncode=1))
+    assert result.success is False
+    assert result.error_class == ErrorClass.QUOTA_EXHAUSTED
+
+
 def test_parse_auth_error():
     stdout = _jsonl(
         {"type": "error", "message": "unauthorized — check your authentication", "status": 401},
@@ -163,12 +176,63 @@ def test_parse_generic_error():
     assert result.error_class == ErrorClass.OTHER_ERROR
 
 
+def test_parse_error_with_structured_message():
+    stdout = _jsonl(
+        {"type": "error", "message": {"detail": "quota exhausted now"}, "status": "429"},
+    )
+    result = PROVIDER._parse_jsonl(_proc(stdout, returncode=1))
+    assert result.success is False
+    assert result.error_class == ErrorClass.QUOTA_EXHAUSTED
+    assert "quota exhausted now" in result.error_message
+
+
 def test_parse_no_assistant_message_exit_zero():
     """Exit 0 but no agent_message → OTHER_ERROR (unexpected empty response)."""
     stdout = _jsonl({"type": "thread.started", "thread_id": "t1"})
     result = PROVIDER._parse_jsonl(_proc(stdout, returncode=0))
     assert result.success is False
     assert result.error_class == ErrorClass.OTHER_ERROR
+
+
+def test_parse_message_shape_with_role_assistant():
+    stdout = _jsonl(
+        {"type": "thread.started", "thread_id": "t1"},
+        {
+            "type": "message.completed",
+            "message": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Assistant text"}],
+            },
+        },
+    )
+    result = PROVIDER._parse_jsonl(_proc(stdout, returncode=0))
+    assert result.success is True
+    assert result.text == "Assistant text"
+    assert result.session_id == "t1"
+
+
+def test_parse_response_shape_output_content():
+    stdout = _jsonl(
+        {"type": "thread.started", "thread_id": "t2"},
+        {
+            "type": "response.completed",
+            "response": {
+                "type": "response",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Final output"}],
+                    }
+                ],
+            },
+        },
+    )
+    result = PROVIDER._parse_jsonl(_proc(stdout, returncode=0))
+    assert result.success is True
+    assert result.text == "Final output"
+    assert result.session_id == "t2"
 
 
 def test_parse_nonzero_exit_no_json():

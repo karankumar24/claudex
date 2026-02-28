@@ -22,7 +22,7 @@ from rich.table import Table
 
 from .config import load_config
 from .handoff import update_handoff
-from .models import Provider
+from .models import Provider, ProviderState
 from .router import get_available_providers, run_with_retry
 from .state import (
     CLAUDEX_DIR,
@@ -45,6 +45,29 @@ app = typer.Typer(
 
 console = Console()
 err_console = Console(stderr=True)
+
+
+def _format_cooldown(ps: ProviderState, now: datetime) -> str:
+    if not (ps.cooldown_until and ps.cooldown_until > now):
+        return "—"
+
+    remaining = ps.cooldown_until - now
+    mins = max(0, int(remaining.total_seconds() / 60))
+    return f"[yellow]{mins} min[/yellow]"
+
+
+def _format_cooldown_until(ps: ProviderState, now: datetime) -> str:
+    if not (ps.cooldown_until and ps.cooldown_until > now):
+        return "—"
+    until_utc = ps.cooldown_until.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    until_local = ps.cooldown_until.astimezone().strftime("%Y-%m-%d %H:%M %Z")
+    return f"{until_utc} / {until_local}"
+
+
+def _format_cooldown_source(ps: ProviderState, now: datetime) -> str:
+    if not (ps.cooldown_until and ps.cooldown_until > now):
+        return "—"
+    return ps.cooldown_source or "unknown"
 
 
 # ── Shared turn executor ──────────────────────────────────────────────────────
@@ -115,6 +138,9 @@ def _run_turn(user_prompt: str, config: dict) -> tuple[bool, Optional[Provider]]
             user_prompt=user_prompt,
             assistant_text=result.text,
             session_id=ps.session_id,
+            cooldown_until=ps.cooldown_until,
+            cooldown_source=ps.cooldown_source,
+            cooldown_reason=ps.cooldown_reason,
         )
         return True, provider
 
@@ -125,10 +151,16 @@ def _run_turn(user_prompt: str, config: dict) -> tuple[bool, Optional[Provider]]
             f"[{result.error_class.value if result.error_class else 'UNKNOWN'}] "
             f"{result.error_message}\n"
         )
+        ps = updated_state.get_provider_state(provider) if provider else None
+        session_id = result.session_id or (ps.session_id if ps else None)
         record_turn(
             provider=provider,
             user_prompt=user_prompt,
             assistant_text=None,
+            session_id=session_id,
+            cooldown_until=ps.cooldown_until if ps else None,
+            cooldown_source=ps.cooldown_source if ps else None,
+            cooldown_reason=ps.cooldown_reason if ps else None,
             error=(
                 f"{result.error_class.value}: {result.error_message}"
                 if result.error_class
@@ -222,6 +254,8 @@ def status() -> None:
     table.add_column("Session ID")
     table.add_column("Last Used")
     table.add_column("Cooldown")
+    table.add_column("Cooldown Until")
+    table.add_column("Cooldown Source")
 
     for p_name in provider_order:
         try:
@@ -237,13 +271,19 @@ def status() -> None:
         last_used_str = (
             ps.last_used.strftime("%Y-%m-%d %H:%M") if ps.last_used else "—"
         )
-        cooldown_str = "—"
-        if in_cooldown and ps.cooldown_until:
-            remaining = ps.cooldown_until - now
-            mins = int(remaining.total_seconds() / 60)
-            cooldown_str = f"[yellow]{mins} min[/yellow]"
+        cooldown_str = _format_cooldown(ps, now)
+        cooldown_until_str = _format_cooldown_until(ps, now)
+        cooldown_source_str = _format_cooldown_source(ps, now)
 
-        table.add_row(p_name, status_str, session_str, last_used_str, cooldown_str)
+        table.add_row(
+            p_name,
+            status_str,
+            session_str,
+            last_used_str,
+            cooldown_str,
+            cooldown_until_str,
+            cooldown_source_str,
+        )
 
     console.print(table)
     console.print()

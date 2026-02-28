@@ -7,6 +7,9 @@ Each turn appends one JSON line to .claudex/transcript.ndjson containing:
   user_prompt     — the original (un-augmented) user prompt
   assistant_text  — the response text, or null on error
   session_id      — provider session/thread id if available
+  cooldown_until  — ISO-8601 UTC cooldown timestamp if one was set
+  cooldown_source — source label for cooldown derivation
+  cooldown_reason — machine-readable reason for cooldown
   error           — "ERROR_CLASS: message" on failure, null on success
 """
 
@@ -24,6 +27,9 @@ def record_turn(
     user_prompt: str,
     assistant_text: Optional[str],
     session_id: Optional[str] = None,
+    cooldown_until: Optional[datetime] = None,
+    cooldown_source: Optional[str] = None,
+    cooldown_reason: Optional[str] = None,
     error: Optional[str] = None,
 ) -> None:
     """
@@ -36,6 +42,11 @@ def record_turn(
         "user_prompt": user_prompt,
         "assistant_text": assistant_text,
         "session_id": session_id,
+        "cooldown_until": (
+            cooldown_until.astimezone(timezone.utc).isoformat() if cooldown_until else None
+        ),
+        "cooldown_source": cooldown_source,
+        "cooldown_reason": cooldown_reason,
         "error": error,
     }
     append_transcript(entry)
