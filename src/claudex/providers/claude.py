@@ -32,6 +32,8 @@ from ..models import ErrorClass
 # Strings that indicate the monthly usage plan is exhausted (case-insensitive match)
 _QUOTA_PATTERNS = [
     "usage limit reached",
+    "you've hit your limit",
+    "hit your limit",
     "claude.ai/settings/limits",
     "you've reached your",
     "monthly limit",

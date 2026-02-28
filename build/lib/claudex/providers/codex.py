@@ -27,6 +27,15 @@ from typing import Optional
 from .base import BaseProvider, ProviderResult
 from ..models import ErrorClass
 
+_QUOTA_PATTERNS = (
+    "quota",
+    "usage limit",
+    "exhausted",
+    "hit your limit",
+    "limit reached",
+    "billing period",
+)
+
 
 class CodexProvider(BaseProvider):
     name = "codex"
@@ -154,6 +163,12 @@ class CodexProvider(BaseProvider):
             elif event_type == "error":
                 last_error = event
 
+            # Newer codex versions can emit assistant responses in additional
+            # event envelopes (for example "message" / "response" objects).
+            extracted = self._extract_assistant_text(event)
+            if extracted:
+                assistant_text = extracted
+
         # ── Determine result ──────────────────────────────────────────────────
 
         if last_error:
@@ -203,8 +218,10 @@ class CodexProvider(BaseProvider):
 
         # 429 can be either quota-exhausted or transient rate limit —
         # distinguish by checking the message content
-        if status == 429 or "rate limit" in message or "quota" in message:
-            if "quota" in message or "usage limit" in message or "exhausted" in message:
+        if status == 429 or "rate limit" in message or any(
+            p in message for p in _QUOTA_PATTERNS
+        ):
+            if any(p in message for p in _QUOTA_PATTERNS):
                 return ErrorClass.QUOTA_EXHAUSTED
             return ErrorClass.TRANSIENT_RATE_LIMIT
 
@@ -217,7 +234,7 @@ class CodexProvider(BaseProvider):
         """Fallback classifier when there is no structured error event."""
         lower = text.lower()
 
-        if "quota" in lower or "usage limit" in lower or "exhausted" in lower:
+        if any(p in lower for p in _QUOTA_PATTERNS):
             return ErrorClass.QUOTA_EXHAUSTED
 
         if "rate limit" in lower or "429" in text or "too many requests" in lower:
@@ -227,3 +244,75 @@ class CodexProvider(BaseProvider):
             return ErrorClass.AUTH_REQUIRED
 
         return ErrorClass.OTHER_ERROR
+
+    def _extract_assistant_text(self, event: dict) -> Optional[str]:
+        """Extract assistant text from multiple codex JSONL event shapes."""
+        candidates: list[dict] = []
+
+        item = event.get("item")
+        if isinstance(item, dict):
+            candidates.append(item)
+        message = event.get("message")
+        if isinstance(message, dict):
+            candidates.append(message)
+        response = event.get("response")
+        if isinstance(response, dict):
+            candidates.append(response)
+
+        for candidate in candidates:
+            text = self._extract_text_from_message_like(candidate)
+            if text:
+                return text
+        return None
+
+    def _extract_text_from_message_like(self, obj: dict) -> Optional[str]:
+        obj_type = str(obj.get("type", "")).lower()
+        role = str(obj.get("role", "")).lower()
+
+        is_assistant = (
+            obj_type in {"agent_message", "assistant_message", "message"}
+            and (not role or role == "assistant")
+        )
+        is_response = obj_type == "response"
+
+        if not (is_assistant or is_response):
+            return None
+
+        # Most common format: content=[{text/output_text: "..."}]
+        content = obj.get("content")
+        if isinstance(content, list):
+            text = self._collect_text_from_blocks(content)
+            if text:
+                return text
+
+        # Response-style format: output=[{content:[...]}]
+        output = obj.get("output")
+        if isinstance(output, list):
+            parts: list[str] = []
+            for out in output:
+                if not isinstance(out, dict):
+                    continue
+                nested_content = out.get("content")
+                if isinstance(nested_content, list):
+                    nested_text = self._collect_text_from_blocks(nested_content)
+                    if nested_text:
+                        parts.append(nested_text)
+            if parts:
+                return "\n".join(parts)
+
+        # Some versions can emit a direct output_text/text field.
+        direct_text = obj.get("output_text") or obj.get("text")
+        if isinstance(direct_text, str) and direct_text:
+            return direct_text
+
+        return None
+
+    def _collect_text_from_blocks(self, blocks: list) -> str:
+        parts: list[str] = []
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            text = block.get("text") or block.get("output_text")
+            if isinstance(text, str) and text:
+                parts.append(text)
+        return "\n".join(parts)

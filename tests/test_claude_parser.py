@@ -54,6 +54,24 @@ def test_parse_json_array_error_classified():
     assert result.session_id == "sess_2"
 
 
+def test_parse_quota_wording_hit_your_limit_classified():
+    stdout = json.dumps(
+        [
+            {
+                "type": "result",
+                "result": "You've hit your limit · resets 6pm (America/Los_Angeles)",
+                "session_id": "sess_qlim",
+                "is_error": True,
+            }
+        ]
+    )
+
+    result = PROVIDER._parse(_proc(stdout, returncode=1), stdout)
+    assert result.success is False
+    assert result.error_class == ErrorClass.QUOTA_EXHAUSTED
+    assert result.session_id == "sess_qlim"
+
+
 def test_parse_empty_result_is_still_success():
     stdout = json.dumps(
         [{"type": "result", "result": "", "session_id": "sess_empty", "is_error": False}]

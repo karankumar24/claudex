@@ -20,9 +20,12 @@ All state mutations are returned (not written to disk) — callers save to disk.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .handoff import build_provider_prompt
 from .models import ClaudexState, ErrorClass, Provider, ProviderState
@@ -38,6 +41,37 @@ PROVIDERS: dict[Provider, BaseProvider] = {
     Provider.CLAUDE: ClaudeProvider(),
     Provider.CODEX: CodexProvider(),
 }
+
+# Defensive fallback patterns for quota/plan exhaustion text.
+# Used only when a provider returns OTHER_ERROR with a clearly limit-like message.
+_LIMIT_TEXT_PATTERNS = (
+    "usage limit",
+    "quota",
+    "hit your limit",
+    "limit reached",
+    "billing period",
+    "resets ",
+    "claude.ai/settings/limits",
+)
+
+_RESET_TIME_12H_PATTERN = re.compile(
+    r"resets?\s+(?:at\s+)?(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*"
+    r"(?P<ampm>am|pm)\s*[.,:;\-·]?\s*\((?P<tz>[^)]+)\)",
+    re.IGNORECASE,
+)
+_RESET_TIME_24H_PATTERN = re.compile(
+    r"resets?\s+(?:at\s+)?(?P<hour>(?:[01]?\d|2[0-3])):(?P<minute>[0-5]\d)"
+    r"\s*[.,:;\-·]?\s*\((?P<tz>[^)]+)\)",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class _CooldownDecision:
+    until: datetime
+    source: str
+    reason: str
+    message_excerpt: Optional[str] = None
 
 
 # ── Provider availability ─────────────────────────────────────────────────────
@@ -150,11 +184,13 @@ def run_with_retry(
             # The session already contains the conversation history.
             prompt = user_prompt
 
+        provider_session_id = None if is_fallback else ps.session_id
+
         # ── Retry loop for this provider ──────────────────────────────────────
         for attempt in range(max_retries + 1):
             result = provider_obj.run(
                 prompt=prompt,
-                session_id=ps.session_id,
+                session_id=provider_session_id,
                 config=config,
             )
 
@@ -163,6 +199,7 @@ def run_with_retry(
                 ps.session_id = result.session_id or ps.session_id
                 ps.last_used = datetime.now(timezone.utc)
                 ps.consecutive_errors = 0
+                _clear_cooldown(ps)
                 state.set_provider_state(provider, ps)
                 state.last_provider = provider
                 state.turn_count += 1
@@ -173,15 +210,28 @@ def run_with_retry(
             ps.consecutive_errors += 1
             state.set_provider_state(provider, ps)
 
-            if result.error_class == ErrorClass.QUOTA_EXHAUSTED:
+            effective_error = result.error_class
+            if (
+                effective_error == ErrorClass.OTHER_ERROR
+                and _looks_like_limit_exhaustion(result.error_message)
+            ):
+                # Defensive behavior: if provider parsing misses a limit phrase,
+                # still trigger quota cooldown + automatic failover.
+                effective_error = ErrorClass.QUOTA_EXHAUSTED
+
+            if effective_error == ErrorClass.QUOTA_EXHAUSTED:
                 # Hard quota hit — long cooldown, immediately try next provider
-                ps.cooldown_until = datetime.now(timezone.utc) + timedelta(
-                    minutes=cooldown_minutes
+                now_utc = datetime.now(timezone.utc)
+                decision = _quota_cooldown_decision(
+                    error_message=result.error_message,
+                    now_utc=now_utc,
+                    default_minutes=cooldown_minutes,
                 )
+                _apply_cooldown(ps, decision=decision, now_utc=now_utc)
                 state.set_provider_state(provider, ps)
                 break  # Go to next provider
 
-            elif result.error_class == ErrorClass.TRANSIENT_RATE_LIMIT:
+            elif effective_error == ErrorClass.TRANSIENT_RATE_LIMIT:
                 if attempt < max_retries:
                     # Wait with exponential backoff, then retry the SAME provider
                     wait = min(backoff_base ** attempt, backoff_max)
@@ -190,13 +240,17 @@ def run_with_retry(
                     continue  # Retry
                 else:
                     # Exhausted retries — short cooldown, try next provider
-                    ps.cooldown_until = datetime.now(timezone.utc) + timedelta(
-                        minutes=transient_cooldown_minutes
+                    now_utc = datetime.now(timezone.utc)
+                    decision = _transient_cooldown_decision(
+                        now_utc=now_utc,
+                        cooldown_minutes=transient_cooldown_minutes,
+                        error_message=result.error_message,
                     )
+                    _apply_cooldown(ps, decision=decision, now_utc=now_utc)
                     state.set_provider_state(provider, ps)
                     break
 
-            elif result.error_class in (
+            elif effective_error in (
                 ErrorClass.AUTH_REQUIRED,
                 ErrorClass.OTHER_ERROR,
             ):
@@ -205,3 +259,172 @@ def run_with_retry(
 
     # All providers failed or are now in cooldown
     return result, last_provider, state
+
+
+def _looks_like_limit_exhaustion(message: Optional[str]) -> bool:
+    if not message:
+        return False
+    lower = message.lower()
+    return any(pattern in lower for pattern in _LIMIT_TEXT_PATTERNS)
+
+
+def _clear_cooldown(ps: ProviderState) -> None:
+    ps.cooldown_until = None
+    ps.cooldown_started_at = None
+    ps.cooldown_source = None
+    ps.cooldown_reason = None
+    ps.cooldown_message_excerpt = None
+
+
+def _apply_cooldown(
+    ps: ProviderState,
+    decision: _CooldownDecision,
+    now_utc: datetime,
+) -> None:
+    ps.cooldown_started_at = now_utc
+    ps.cooldown_until = decision.until
+    ps.cooldown_source = decision.source
+    ps.cooldown_reason = decision.reason
+    ps.cooldown_message_excerpt = decision.message_excerpt
+
+
+def _message_excerpt(message: Optional[str], limit: int = 240) -> Optional[str]:
+    if not message:
+        return None
+    normalized = " ".join(message.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[:limit] + "..."
+
+
+def _quota_cooldown_decision(
+    error_message: Optional[str],
+    now_utc: datetime,
+    default_minutes: int,
+) -> _CooldownDecision:
+    reset_until = _extract_reset_time_utc(error_message, now_utc)
+    if reset_until and reset_until > now_utc:
+        return _CooldownDecision(
+            until=reset_until,
+            source="quota_reset_time",
+            reason="quota-exhausted:provider-reset-time",
+            message_excerpt=_message_excerpt(error_message),
+        )
+
+    return _CooldownDecision(
+        until=now_utc + timedelta(minutes=default_minutes),
+        source="quota_default",
+        reason="quota-exhausted:default-cooldown",
+        message_excerpt=_message_excerpt(error_message),
+    )
+
+
+def _transient_cooldown_decision(
+    now_utc: datetime,
+    cooldown_minutes: int,
+    error_message: Optional[str],
+) -> _CooldownDecision:
+    return _CooldownDecision(
+        until=now_utc + timedelta(minutes=cooldown_minutes),
+        source="transient_retry_exhausted",
+        reason="transient-rate-limit:retries-exhausted",
+        message_excerpt=_message_excerpt(error_message),
+    )
+
+
+def _quota_cooldown_until(
+    error_message: Optional[str],
+    now_utc: datetime,
+    default_minutes: int,
+) -> datetime:
+    """
+    Prefer explicit provider reset timestamps (if present in error text).
+    Fall back to fixed-duration cooldown when parsing is not possible.
+    """
+    return _quota_cooldown_decision(error_message, now_utc, default_minutes).until
+
+
+def _extract_reset_time_utc(
+    message: Optional[str],
+    now_utc: datetime,
+) -> Optional[datetime]:
+    if not message:
+        return None
+
+    parsed_12h = _extract_12h_reset_time_utc(message, now_utc)
+    if parsed_12h:
+        return parsed_12h
+
+    return _extract_24h_reset_time_utc(message, now_utc)
+
+
+def _extract_12h_reset_time_utc(message: str, now_utc: datetime) -> Optional[datetime]:
+    match = _RESET_TIME_12H_PATTERN.search(message)
+    if not match:
+        return None
+
+    try:
+        hour_12 = int(match.group("hour"))
+        minute = int(match.group("minute") or "0")
+    except ValueError:
+        return None
+    if not 1 <= hour_12 <= 12:
+        return None
+
+    ampm = (match.group("ampm") or "").lower()
+    if ampm not in {"am", "pm"}:
+        return None
+
+    hour_24 = (hour_12 % 12) + (12 if ampm == "pm" else 0)
+    return _build_reset_time_utc(
+        now_utc=now_utc,
+        tz_name=match.group("tz").strip(),
+        hour_24=hour_24,
+        minute=minute,
+    )
+
+
+def _extract_24h_reset_time_utc(message: str, now_utc: datetime) -> Optional[datetime]:
+    match = _RESET_TIME_24H_PATTERN.search(message)
+    if not match:
+        return None
+
+    try:
+        hour_24 = int(match.group("hour"))
+        minute = int(match.group("minute"))
+    except ValueError:
+        return None
+
+    return _build_reset_time_utc(
+        now_utc=now_utc,
+        tz_name=match.group("tz").strip(),
+        hour_24=hour_24,
+        minute=minute,
+    )
+
+
+def _build_reset_time_utc(
+    now_utc: datetime,
+    tz_name: str,
+    hour_24: int,
+    minute: int,
+) -> Optional[datetime]:
+    if not 0 <= hour_24 <= 23 or not 0 <= minute <= 59:
+        return None
+
+    try:
+        tz = ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        return None
+
+    local_now = now_utc.astimezone(tz)
+    local_reset = local_now.replace(
+        hour=hour_24,
+        minute=minute,
+        second=0,
+        microsecond=0,
+    )
+    if local_reset <= local_now:
+        local_reset += timedelta(days=1)
+
+    return local_reset.astimezone(timezone.utc)

@@ -12,7 +12,12 @@ import pytest
 
 from claudex.models import ClaudexState, ErrorClass, Provider, ProviderState
 from claudex.providers.base import ProviderResult
-from claudex.router import PROVIDERS, get_available_providers, run_with_retry
+from claudex.router import (
+    PROVIDERS,
+    _quota_cooldown_until,
+    get_available_providers,
+    run_with_retry,
+)
 
 # ── Config fixture ────────────────────────────────────────────────────────────
 
@@ -141,6 +146,27 @@ def test_failover_on_quota_exhausted(isolated_dir):
     assert state.claude.cooldown_until > datetime.now(timezone.utc)
 
 
+def test_failover_on_limit_like_other_error(isolated_dir):
+    """
+    If provider returns OTHER_ERROR but message clearly says limit/quota,
+    router should still trigger cooldown + failover.
+    """
+    limit_like = ProviderResult(
+        success=False,
+        error_class=ErrorClass.OTHER_ERROR,
+        error_message="You've hit your limit · resets 6pm (America/Los_Angeles)",
+    )
+    claude_mock = _mock_provider(limit_like)
+    codex_mock = _mock_provider(_ok(text="codex fallback"))
+
+    with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: codex_mock}):
+        result, provider, state = run_with_retry("continue", ClaudexState(), BASE_CONFIG)
+
+    assert result.success is True
+    assert provider == Provider.CODEX
+    assert state.claude.cooldown_until is not None
+
+
 def test_failover_injects_handoff_for_fallback_provider(isolated_dir):
     """
     When falling back, the fallback provider should receive the handoff-
@@ -163,6 +189,24 @@ def test_failover_injects_handoff_for_fallback_provider(isolated_dir):
     call_args = codex_mock.run.call_args
     prompt_sent = call_args[1]["prompt"] if call_args[1] else call_args[0][0]
     assert "Fix auth bug" in prompt_sent
+
+
+def test_failover_uses_fresh_fallback_session(isolated_dir):
+    """
+    Fallback providers should start from a fresh session and rely on handoff
+    context, rather than reusing a previously saved fallback session id.
+    """
+    claude_mock = _mock_provider(_err(ErrorClass.QUOTA_EXHAUSTED))
+    codex_mock = _mock_provider(_ok())
+
+    state = ClaudexState()
+    state.codex.session_id = "old_codex_thread"
+
+    with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: codex_mock}):
+        run_with_retry("continue", state, BASE_CONFIG, handoff_content="# Handoff")
+
+    call_args = codex_mock.run.call_args
+    assert call_args[1]["session_id"] is None
 
 
 def test_preferred_provider_gets_bare_prompt(isolated_dir):
@@ -239,6 +283,8 @@ def test_transient_cooldown_uses_config_value(isolated_dir):
     assert state.claude.cooldown_until is not None
     cooldown = state.claude.cooldown_until - start
     assert cooldown.total_seconds() >= 12 * 60
+    assert state.claude.cooldown_source == "transient_retry_exhausted"
+    assert state.claude.cooldown_reason == "transient-rate-limit:retries-exhausted"
 
 
 # ── run_with_retry — non-retriable errors ────────────────────────────────────
@@ -282,3 +328,77 @@ def test_all_providers_in_cooldown_returns_none(isolated_dir):
     result, provider, _ = run_with_retry("hi", state, BASE_CONFIG)
     assert result is None
     assert provider is None
+
+
+def test_quota_cooldown_uses_reset_time_from_message():
+    now = datetime(2026, 2, 27, 23, 11, tzinfo=timezone.utc)
+    cooldown_until = _quota_cooldown_until(
+        "You've hit your limit · resets 6pm (America/Los_Angeles)",
+        now_utc=now,
+        default_minutes=60,
+    )
+    assert cooldown_until == datetime(2026, 2, 28, 2, 0, tzinfo=timezone.utc)
+
+
+def test_quota_cooldown_rolls_to_next_day_if_reset_time_passed():
+    now = datetime(2026, 2, 28, 3, 11, tzinfo=timezone.utc)
+    cooldown_until = _quota_cooldown_until(
+        "You've hit your limit · resets 6pm (America/Los_Angeles)",
+        now_utc=now,
+        default_minutes=60,
+    )
+    assert cooldown_until == datetime(2026, 3, 1, 2, 0, tzinfo=timezone.utc)
+
+
+def test_quota_cooldown_falls_back_to_default_when_unparseable():
+    now = datetime(2026, 2, 27, 23, 11, tzinfo=timezone.utc)
+    cooldown_until = _quota_cooldown_until(
+        "Usage limit reached for this billing period",
+        now_utc=now,
+        default_minutes=60,
+    )
+    assert cooldown_until == now + timedelta(minutes=60)
+
+
+def test_quota_cooldown_supports_24h_reset_time():
+    now = datetime(2026, 2, 27, 23, 11, tzinfo=timezone.utc)
+    cooldown_until = _quota_cooldown_until(
+        "Usage limit reached · resets at 18:30 (America/Los_Angeles)",
+        now_utc=now,
+        default_minutes=60,
+    )
+    assert cooldown_until == datetime(2026, 2, 28, 2, 30, tzinfo=timezone.utc)
+
+
+def test_quota_cooldown_metadata_uses_reset_source_when_parseable(isolated_dir):
+    limit_like = ProviderResult(
+        success=False,
+        error_class=ErrorClass.OTHER_ERROR,
+        error_message="You've hit your limit · resets 6pm (America/Los_Angeles)",
+    )
+    claude_mock = _mock_provider(limit_like)
+    codex_mock = _mock_provider(_ok(text="codex fallback"))
+
+    with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: codex_mock}):
+        _, _, state = run_with_retry("continue", ClaudexState(), BASE_CONFIG)
+
+    assert state.claude.cooldown_source == "quota_reset_time"
+    assert state.claude.cooldown_reason == "quota-exhausted:provider-reset-time"
+    assert state.claude.cooldown_started_at is not None
+    assert state.claude.cooldown_message_excerpt is not None
+
+
+def test_quota_cooldown_metadata_uses_default_source_when_unparseable(isolated_dir):
+    quota_no_time = ProviderResult(
+        success=False,
+        error_class=ErrorClass.QUOTA_EXHAUSTED,
+        error_message="Usage limit reached for this billing period",
+    )
+    claude_mock = _mock_provider(quota_no_time)
+    codex_mock = _mock_provider(_ok(text="codex fallback"))
+
+    with patch.dict(PROVIDERS, {Provider.CLAUDE: claude_mock, Provider.CODEX: codex_mock}):
+        _, _, state = run_with_retry("continue", ClaudexState(), BASE_CONFIG)
+
+    assert state.claude.cooldown_source == "quota_default"
+    assert state.claude.cooldown_reason == "quota-exhausted:default-cooldown"

@@ -37,6 +37,14 @@ class ProviderState(BaseModel):
     last_used: Optional[datetime] = None
     # If set, this provider is in cooldown until this UTC timestamp
     cooldown_until: Optional[datetime] = None
+    # Timestamp when the current cooldown was applied
+    cooldown_started_at: Optional[datetime] = None
+    # Why this cooldown exists: quota_reset_time | quota_default | transient_retry_exhausted
+    cooldown_source: Optional[str] = None
+    # Additional machine-readable reason
+    cooldown_reason: Optional[str] = None
+    # Bounded excerpt from provider error text used to derive cooldown
+    cooldown_message_excerpt: Optional[str] = None
     # Running count of consecutive errors (reset on success)
     consecutive_errors: int = 0
 

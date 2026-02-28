@@ -39,6 +39,18 @@ PROVIDERS: dict[Provider, BaseProvider] = {
     Provider.CODEX: CodexProvider(),
 }
 
+# Defensive fallback patterns for quota/plan exhaustion text.
+# Used only when a provider returns OTHER_ERROR with a clearly limit-like message.
+_LIMIT_TEXT_PATTERNS = (
+    "usage limit",
+    "quota",
+    "hit your limit",
+    "limit reached",
+    "billing period",
+    "resets ",
+    "claude.ai/settings/limits",
+)
+
 
 # ── Provider availability ─────────────────────────────────────────────────────
 
@@ -173,7 +185,16 @@ def run_with_retry(
             ps.consecutive_errors += 1
             state.set_provider_state(provider, ps)
 
-            if result.error_class == ErrorClass.QUOTA_EXHAUSTED:
+            effective_error = result.error_class
+            if (
+                effective_error == ErrorClass.OTHER_ERROR
+                and _looks_like_limit_exhaustion(result.error_message)
+            ):
+                # Defensive behavior: if provider parsing misses a limit phrase,
+                # still trigger quota cooldown + automatic failover.
+                effective_error = ErrorClass.QUOTA_EXHAUSTED
+
+            if effective_error == ErrorClass.QUOTA_EXHAUSTED:
                 # Hard quota hit — long cooldown, immediately try next provider
                 ps.cooldown_until = datetime.now(timezone.utc) + timedelta(
                     minutes=cooldown_minutes
@@ -181,7 +202,7 @@ def run_with_retry(
                 state.set_provider_state(provider, ps)
                 break  # Go to next provider
 
-            elif result.error_class == ErrorClass.TRANSIENT_RATE_LIMIT:
+            elif effective_error == ErrorClass.TRANSIENT_RATE_LIMIT:
                 if attempt < max_retries:
                     # Wait with exponential backoff, then retry the SAME provider
                     wait = min(backoff_base ** attempt, backoff_max)
@@ -196,7 +217,7 @@ def run_with_retry(
                     state.set_provider_state(provider, ps)
                     break
 
-            elif result.error_class in (
+            elif effective_error in (
                 ErrorClass.AUTH_REQUIRED,
                 ErrorClass.OTHER_ERROR,
             ):
@@ -205,3 +226,10 @@ def run_with_retry(
 
     # All providers failed or are now in cooldown
     return result, last_provider, state
+
+
+def _looks_like_limit_exhaustion(message: Optional[str]) -> bool:
+    if not message:
+        return False
+    lower = message.lower()
+    return any(pattern in lower for pattern in _LIMIT_TEXT_PATTERNS)
