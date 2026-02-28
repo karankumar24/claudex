@@ -42,6 +42,8 @@ npm i -g @openai/codex               # installs `codex`
 ```bash
 cd your-git-repo
 claudex chat
+claudex chat --prefer-provider codex
+claudex chat --auto-switch ask   # ask | yes | no
 ```
 
 ```
@@ -64,12 +66,14 @@ I can see from the handoff that we were refactoring auth…
 ```bash
 claudex ask "what does this function do?"
 claudex ask "fix the failing test in tests/test_auth.py"
+claudex ask help me with a new task   # quotes optional
 ```
 
 ### Check status
 
 ```bash
 claudex status
+claudex status --active
 ```
 
 ```
@@ -87,6 +91,31 @@ codex     ✗ cooldown thread_xyz…  2025-01-14 08:15   47 min    2025-01-14 10
 ```bash
 claudex reset          # prompts for confirmation
 claudex reset --yes    # skip prompt
+```
+
+### Invisible wrappers (codex / claudecode)
+
+Install wrapper launchers so starting `codex` or `claudecode` automatically
+runs through claudex with failover + continuity:
+
+```bash
+claudex install-wrappers
+```
+
+Wrappers installed:
+- `codex` -> `claudex chat/ask --prefer-provider codex`
+- `claudecode` -> `claudex chat/ask --prefer-provider claude`
+
+Set fallback policy for wrappers with environment variable:
+
+```bash
+export CLAUDEX_AUTO_SWITCH=ask   # ask | yes | no
+```
+
+Remove wrappers:
+
+```bash
+claudex uninstall-wrappers
 ```
 
 ## Configuration
@@ -116,6 +145,9 @@ backoff_base = 2.0      # exponential backoff base (seconds)
 backoff_max = 30.0      # max single wait
 cooldown_minutes = 60   # fallback cooldown for QUOTA_EXHAUSTED when reset time is unavailable
 transient_cooldown_minutes = 5 # cooldown after exhausted transient retries
+
+[switch]
+confirmation = "ask"    # ask | yes | no
 ```
 
 ## Error handling
@@ -131,7 +163,7 @@ transient_cooldown_minutes = 5 # cooldown after exhausted transient retries
 
 ```
 src/claudex/
-├── main.py         — typer CLI: chat / ask / status / reset
+├── main.py         — typer CLI: chat / ask / status / wrapper install / reset
 ├── models.py       — pydantic models (Provider, ErrorClass, state)
 ├── state.py        — .claudex/ IO (state.json, handoff.md, transcript)
 ├── config.py       — layered config loading (defaults → user → repo)
@@ -154,3 +186,4 @@ pytest tests/ -v
 - **No secrets** are ever written to `.claudex/` — no API keys, tokens, or credentials.
 - The transcript and handoff files may contain your prompt/response text, so add `.claudex/` to `.gitignore` if you prefer privacy.
 - The state file stores session IDs, cooldown timestamps, and cooldown source metadata (for debugging failover decisions).
+- `active.json` stores only temporary in-flight turn metadata while a turn is running.

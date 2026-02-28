@@ -20,6 +20,7 @@ CLAUDEX_DIR = Path(".claudex")
 STATE_FILE = CLAUDEX_DIR / "state.json"
 HANDOFF_FILE = CLAUDEX_DIR / "handoff.md"
 TRANSCRIPT_FILE = CLAUDEX_DIR / "transcript.ndjson"
+ACTIVE_RUN_FILE = CLAUDEX_DIR / "active.json"
 REPO_CONFIG_FILE = CLAUDEX_DIR / "config.toml"
 
 # User-global config (lower priority than repo config)
@@ -87,6 +88,40 @@ def append_transcript(entry: dict) -> None:
     line = json.dumps(entry, ensure_ascii=False, default=str)
     with TRANSCRIPT_FILE.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
+
+
+# ── Active run metadata ───────────────────────────────────────────────────────
+
+
+def load_active_run() -> Optional[dict]:
+    """
+    Return active run metadata from .claudex/active.json, or None if missing.
+    Invalid JSON is treated as missing.
+    """
+    if not ACTIVE_RUN_FILE.exists():
+        return None
+    try:
+        loaded = json.loads(ACTIVE_RUN_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def save_active_run(entry: dict) -> None:
+    """Overwrite .claudex/active.json with the current in-flight run metadata."""
+    ensure_dir()
+    ACTIVE_RUN_FILE.write_text(
+        json.dumps(entry, ensure_ascii=False, default=str, indent=2),
+        encoding="utf-8",
+    )
+
+
+def clear_active_run() -> None:
+    """Delete .claudex/active.json if present."""
+    try:
+        ACTIVE_RUN_FILE.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 # ── Reset ─────────────────────────────────────────────────────────────────────

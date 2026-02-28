@@ -11,6 +11,9 @@ Each turn appends one JSON line to .claudex/transcript.ndjson containing:
   cooldown_source — source label for cooldown derivation
   cooldown_reason — machine-readable reason for cooldown
   error           — "ERROR_CLASS: message" on failure, null on success
+  switch_from     — provider we attempted to switch away from
+  switch_to       — provider we considered switching to
+  switch_prompt_decision — approved | denied | null
 """
 
 from __future__ import annotations
@@ -31,6 +34,9 @@ def record_turn(
     cooldown_source: Optional[str] = None,
     cooldown_reason: Optional[str] = None,
     error: Optional[str] = None,
+    switch_from: Optional[str] = None,
+    switch_to: Optional[str] = None,
+    switch_prompt_decision: Optional[str] = None,
 ) -> None:
     """
     Append one turn to the append-only transcript.
@@ -48,5 +54,8 @@ def record_turn(
         "cooldown_source": cooldown_source,
         "cooldown_reason": cooldown_reason,
         "error": error,
+        "switch_from": switch_from,
+        "switch_to": switch_to,
+        "switch_prompt_decision": switch_prompt_decision,
     }
     append_transcript(entry)

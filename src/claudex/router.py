@@ -24,7 +24,7 @@ from dataclasses import dataclass
 import re
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .handoff import build_provider_prompt
@@ -123,6 +123,10 @@ def run_with_retry(
     state: ClaudexState,
     config: dict,
     handoff_content: Optional[str] = None,
+    confirm_switch: Optional[
+        Callable[[Provider, Provider, ProviderResult], bool]
+    ] = None,
+    on_provider_start: Optional[Callable[[Provider], None]] = None,
 ) -> Tuple[Optional[ProviderResult], Optional[Provider], ClaudexState]:
     """
     Execute a single user prompt against the best available provider,
@@ -161,8 +165,17 @@ def run_with_retry(
 
     result: Optional[ProviderResult] = None
     last_provider: Optional[Provider] = None
+    pending_fallback: Optional[tuple[Provider, ProviderResult]] = None
 
     for idx, provider in enumerate(available):
+        # If we are moving to a fallback provider due to a previous provider
+        # failure, allow the caller to gate that switch.
+        if idx > 0 and pending_fallback and confirm_switch:
+            from_provider, failed_result = pending_fallback
+            approved = confirm_switch(from_provider, provider, failed_result)
+            if not approved:
+                return failed_result, from_provider, state
+
         last_provider = provider
         ps: ProviderState = state.get_provider_state(provider)
         provider_obj: BaseProvider = PROVIDERS[provider]
@@ -188,6 +201,8 @@ def run_with_retry(
 
         # ── Retry loop for this provider ──────────────────────────────────────
         for attempt in range(max_retries + 1):
+            if on_provider_start:
+                on_provider_start(provider)
             result = provider_obj.run(
                 prompt=prompt,
                 session_id=provider_session_id,
@@ -229,6 +244,7 @@ def run_with_retry(
                 )
                 _apply_cooldown(ps, decision=decision, now_utc=now_utc)
                 state.set_provider_state(provider, ps)
+                pending_fallback = (provider, result)
                 break  # Go to next provider
 
             elif effective_error == ErrorClass.TRANSIENT_RATE_LIMIT:
@@ -248,6 +264,7 @@ def run_with_retry(
                     )
                     _apply_cooldown(ps, decision=decision, now_utc=now_utc)
                     state.set_provider_state(provider, ps)
+                    pending_fallback = (provider, result)
                     break
 
             elif effective_error in (

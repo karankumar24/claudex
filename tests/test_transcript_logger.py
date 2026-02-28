@@ -15,6 +15,9 @@ def test_record_turn_persists_cooldown_metadata(isolated_dir):
         cooldown_source="quota_reset_time",
         cooldown_reason="quota-exhausted:provider-reset-time",
         error="QUOTA_EXHAUSTED: You've hit your limit",
+        switch_from="claude",
+        switch_to="codex",
+        switch_prompt_decision="approved",
     )
 
     path = isolated_dir / ".claudex" / "transcript.ndjson"
@@ -26,3 +29,6 @@ def test_record_turn_persists_cooldown_metadata(isolated_dir):
     assert entry["cooldown_until"] == "2026-02-28T02:00:00+00:00"
     assert entry["cooldown_source"] == "quota_reset_time"
     assert entry["cooldown_reason"] == "quota-exhausted:provider-reset-time"
+    assert entry["switch_from"] == "claude"
+    assert entry["switch_to"] == "codex"
+    assert entry["switch_prompt_decision"] == "approved"
