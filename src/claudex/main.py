@@ -6,7 +6,7 @@ Commands
   claudex chat                      — interactive REPL loop
   claudex ask "<prompt>"            — single-turn one-shot mode
   claudex status [--active]         — show provider state (+ active turn metadata)
-  claudex install-wrappers          — install codex/claudecode wrapper scripts
+  claudex install-wrappers          — install claude/claudecode/codex wrapper scripts
   claudex uninstall-wrappers        — remove wrapper scripts
   claudex reset                     — clear .claudex/ for the current repo
 """
@@ -59,7 +59,7 @@ err_console = Console(stderr=True)
 
 
 WRAPPER_MARKER = "CLAUDEX_WRAPPER"
-DEFAULT_WRAPPER_DIR = Path.home() / ".local" / "bin"
+DEFAULT_WRAPPER_DIR = Path.home() / ".claudex" / "bin"
 
 
 class AutoSwitchPolicy(str, Enum):
@@ -321,7 +321,7 @@ def _render_active_state(entry: Optional[dict]) -> None:
 
 def _wrapper_script(
     preferred: Provider,
-    real_codex_bin: Optional[str] = None,
+    real_provider_bin: Optional[str] = None,
 ) -> str:
     preferred_name = preferred.value
     lines = [
@@ -330,25 +330,24 @@ def _wrapper_script(
         "set -e",
     ]
 
-    if preferred == Provider.CODEX:
-        if real_codex_bin:
-            quoted = shlex.quote(real_codex_bin)
-            lines.extend(
-                [
-                    f"REAL_CODEX_BIN={quoted}",
-                    'if [ "${CLAUDEX_INNER_PROVIDER_CALL:-0}" = "1" ]; then',
-                    '  exec "$REAL_CODEX_BIN" "$@"',
-                    "fi",
-                ]
-            )
+    if real_provider_bin:
+        quoted = shlex.quote(real_provider_bin)
+        lines.extend(
+            [
+                f"REAL_PROVIDER_BIN={quoted}",
+                'if [ "${CLAUDEX_INNER_PROVIDER_CALL:-0}" = "1" ]; then',
+                '  exec "$REAL_PROVIDER_BIN" "$@"',
+                "fi",
+                # Keep native CLI behavior for standard option invocations.
+                'if [ "$#" -gt 0 ] && [ "${1#-}" != "$1" ]; then',
+                '  exec "$REAL_PROVIDER_BIN" "$@"',
+                "fi",
+            ]
+        )
 
     lines.extend(
         [
-            'AUTO_SWITCH="${CLAUDEX_AUTO_SWITCH:-ask}"',
-            'if [ "$#" -eq 0 ]; then',
-            f'  exec claudex chat --prefer-provider {preferred_name} --auto-switch "$AUTO_SWITCH"',
-            "fi",
-            f'exec claudex ask --prefer-provider {preferred_name} --auto-switch "$AUTO_SWITCH" "$@"',
+            f'exec claudex launch --prefer-provider {preferred_name} -- "$@"',
         ]
     )
     return "\n".join(lines) + "\n"
@@ -370,29 +369,67 @@ def _is_claudex_wrapper(path: Path) -> bool:
         return False
 
 
-def _find_real_binary(name: str, wrapper_dir: Path) -> Optional[str]:
+def _extract_real_provider_bin_from_wrapper(path: Path) -> Optional[str]:
+    """
+    Return REAL_PROVIDER_BIN from a claudex wrapper script when present.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+
+    for line in text.splitlines():
+        if not line.startswith("REAL_PROVIDER_BIN="):
+            continue
+        raw = line.split("=", 1)[1].strip()
+        try:
+            parts = shlex.split(raw)
+        except ValueError:
+            return None
+        if not parts:
+            return None
+        resolved = parts[0]
+        try:
+            resolved_path = Path(resolved).resolve()
+            wrapper_path = path.resolve()
+        except OSError:
+            return None
+        # Guard against wrappers that accidentally point back to themselves.
+        if resolved_path == wrapper_path:
+            return None
+        if resolved_path.exists() and os.access(resolved_path, os.X_OK):
+            return resolved
+    return None
+
+
+def _find_real_binary(name: str, _wrapper_dir: Path) -> Optional[str]:
     """
     Resolve an executable for `name` from PATH, skipping claudex wrapper files.
     """
-    wrapper_target = (wrapper_dir / name).resolve()
     for raw_dir in os.environ.get("PATH", "").split(os.pathsep):
         if not raw_dir:
             continue
         candidate = Path(raw_dir) / name
-        try:
-            resolved = candidate.resolve()
-        except OSError:
-            continue
-        if resolved == wrapper_target:
-            continue
         if not candidate.exists() or not candidate.is_file():
             continue
         if not os.access(candidate, os.X_OK):
             continue
         if _is_claudex_wrapper(candidate):
+            extracted = _extract_real_provider_bin_from_wrapper(candidate)
+            if extracted:
+                return extracted
             continue
         return str(candidate)
     return None
+
+
+def _real_binary_for_provider(provider: Provider, wrapper_dir: Path) -> Optional[str]:
+    if provider == Provider.CODEX:
+        return _find_real_binary("codex", wrapper_dir)
+    # Some setups expose Claude Code as `claudecode` rather than `claude`.
+    return _find_real_binary("claude", wrapper_dir) or _find_real_binary(
+        "claudecode", wrapper_dir
+    )
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
@@ -567,7 +604,7 @@ def install_wrappers(
     directory: Path = typer.Option(
         DEFAULT_WRAPPER_DIR,
         "--dir",
-        help="Directory where codex/claudecode wrapper scripts will be created.",
+        help="Directory where claude/claudecode/codex wrapper scripts will be created.",
     ),
     overwrite: bool = typer.Option(
         False,
@@ -576,10 +613,11 @@ def install_wrappers(
     ),
 ) -> None:
     """
-    Install invisible launcher wrappers for `codex` and `claudecode`.
+    Install invisible launcher wrappers for `claude`, `claudecode`, and `codex`.
 
-    - `codex`      -> claudex chat/ask with codex preferred first
-    - `claudecode` -> claudex chat/ask with claude preferred first
+    - `claude`     -> claudex launch with claude preferred first
+    - `claudecode` -> claudex launch with claude preferred first
+    - `codex`      -> claudex launch with codex preferred first
     """
     real_codex = _find_real_binary("codex", directory)
     if not real_codex:
@@ -587,10 +625,46 @@ def install_wrappers(
             "[bold red]Could not locate the real codex binary in PATH.[/bold red]"
         )
         raise typer.Exit(1)
+    real_claude = _find_real_binary("claude", directory) or _find_real_binary(
+        "claudecode", directory
+    )
+    if not real_claude:
+        err_console.print(
+            "[bold red]Could not locate a real claude/claudecode binary in PATH.[/bold red]"
+        )
+        raise typer.Exit(1)
+
+    targets = {
+        "claude": (directory / "claude").resolve(),
+        "claudecode": (directory / "claudecode").resolve(),
+        "codex": (directory / "codex").resolve(),
+    }
+    try:
+        real_claude_resolved = Path(real_claude).resolve()
+        real_codex_resolved = Path(real_codex).resolve()
+    except OSError:
+        err_console.print(
+            "[bold red]Failed to resolve real provider binary paths.[/bold red]"
+        )
+        raise typer.Exit(1)
+
+    if real_claude_resolved in {targets["claude"], targets["claudecode"]}:
+        err_console.print(
+            "[bold red]Refusing to overwrite the real claude/claudecode binary in-place.[/bold red] "
+            "Use a dedicated wrapper directory (default: ~/.claudex/bin) and put it first in PATH."
+        )
+        raise typer.Exit(1)
+    if real_codex_resolved == targets["codex"]:
+        err_console.print(
+            "[bold red]Refusing to overwrite the real codex binary in-place.[/bold red] "
+            "Use a dedicated wrapper directory (default: ~/.claudex/bin) and put it first in PATH."
+        )
+        raise typer.Exit(1)
 
     wrappers = {
-        "codex": _wrapper_script(Provider.CODEX, real_codex_bin=real_codex),
-        "claudecode": _wrapper_script(Provider.CLAUDE),
+        "claude": _wrapper_script(Provider.CLAUDE, real_provider_bin=real_claude),
+        "claudecode": _wrapper_script(Provider.CLAUDE, real_provider_bin=real_claude),
+        "codex": _wrapper_script(Provider.CODEX, real_provider_bin=real_codex),
     }
 
     written: list[Path] = []
@@ -614,19 +688,80 @@ def install_wrappers(
     )
 
 
+@app.command()
+def launch(
+    prefer_provider: Optional[Provider] = typer.Option(
+        None,
+        "--prefer-provider",
+        help="Temporarily prioritize this provider first for this launch.",
+    ),
+    args: Optional[list[str]] = typer.Argument(
+        None,
+        metavar="ARGS...",
+        help="Arguments passed through to the launched provider CLI.",
+    ),
+) -> None:
+    """
+    Launch the selected provider's native CLI UI directly (transparent mode).
+
+    This command does provider routing only, then execs the real `claude` or
+    `codex` binary so native progress output and interaction stay unchanged.
+    """
+    config = load_config()
+    launch_config = _with_preferred_provider(config, prefer_provider)
+    state = load_state()
+    available = get_available_providers(state, launch_config)
+
+    if not available:
+        err_console.print(
+            "\n[bold red]✗ All providers are in cooldown.[/bold red] "
+            "Run [bold]claudex status[/bold] to see timers.\n"
+        )
+        raise typer.Exit(1)
+
+    selected: Optional[Provider] = None
+    binary: Optional[str] = None
+    for candidate in available:
+        resolved = _real_binary_for_provider(candidate, DEFAULT_WRAPPER_DIR)
+        if resolved:
+            selected = candidate
+            binary = resolved
+            break
+
+    if selected is None or binary is None:
+        err_console.print(
+            "[bold red]Could not locate a real claude/claudecode/codex binary in PATH.[/bold red]"
+        )
+        raise typer.Exit(1)
+
+    if prefer_provider is not None and selected != prefer_provider:
+        err_console.print(
+            f"claudex: switched {prefer_provider.value} -> {selected.value}"
+        )
+
+    forward_args = args or []
+    argv = [binary, *forward_args]
+    env = os.environ.copy()
+    # Protect against wrapper recursion in environments where provider wrappers
+    # may still be reachable first in PATH.
+    env["CLAUDEX_INNER_PROVIDER_CALL"] = "1"
+
+    os.execvpe(binary, argv, env)
+
+
 @app.command("uninstall-wrappers")
 def uninstall_wrappers(
     directory: Path = typer.Option(
         DEFAULT_WRAPPER_DIR,
         "--dir",
-        help="Directory containing codex/claudecode wrapper scripts.",
+        help="Directory containing claude/claudecode/codex wrapper scripts.",
     ),
 ) -> None:
     """
     Remove wrapper scripts previously created by `claudex install-wrappers`.
     """
     removed = 0
-    for name in ("codex", "claudecode"):
+    for name in ("claude", "codex", "claudecode"):
         path = directory / name
         if not path.exists():
             continue
