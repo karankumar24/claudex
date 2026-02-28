@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from enum import Enum
 import os
 from pathlib import Path
+import shlex
 import stat
 import sys
 from typing import Optional
@@ -318,18 +319,39 @@ def _render_active_state(entry: Optional[dict]) -> None:
     console.print(f"[bold]Prompt:[/bold]      {entry.get('prompt_excerpt', '—')}")
 
 
-def _wrapper_script(preferred: Provider) -> str:
+def _wrapper_script(
+    preferred: Provider,
+    real_codex_bin: Optional[str] = None,
+) -> str:
     preferred_name = preferred.value
-    return (
-        "#!/usr/bin/env sh\n"
-        f"# {WRAPPER_MARKER}\n"
-        "set -e\n"
-        'AUTO_SWITCH="${CLAUDEX_AUTO_SWITCH:-ask}"\n'
-        'if [ "$#" -eq 0 ]; then\n'
-        f'  exec claudex chat --prefer-provider {preferred_name} --auto-switch "$AUTO_SWITCH"\n'
-        "fi\n"
-        f'exec claudex ask --prefer-provider {preferred_name} --auto-switch "$AUTO_SWITCH" "$@"\n'
+    lines = [
+        "#!/usr/bin/env sh",
+        f"# {WRAPPER_MARKER}",
+        "set -e",
+    ]
+
+    if preferred == Provider.CODEX:
+        if real_codex_bin:
+            quoted = shlex.quote(real_codex_bin)
+            lines.extend(
+                [
+                    f"REAL_CODEX_BIN={quoted}",
+                    'if [ "${CLAUDEX_INNER_PROVIDER_CALL:-0}" = "1" ]; then',
+                    '  exec "$REAL_CODEX_BIN" "$@"',
+                    "fi",
+                ]
+            )
+
+    lines.extend(
+        [
+            'AUTO_SWITCH="${CLAUDEX_AUTO_SWITCH:-ask}"',
+            'if [ "$#" -eq 0 ]; then',
+            f'  exec claudex chat --prefer-provider {preferred_name} --auto-switch "$AUTO_SWITCH"',
+            "fi",
+            f'exec claudex ask --prefer-provider {preferred_name} --auto-switch "$AUTO_SWITCH" "$@"',
+        ]
     )
+    return "\n".join(lines) + "\n"
 
 
 def _write_wrapper(path: Path, content: str) -> None:
@@ -346,6 +368,31 @@ def _is_claudex_wrapper(path: Path) -> bool:
         return WRAPPER_MARKER in path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return False
+
+
+def _find_real_binary(name: str, wrapper_dir: Path) -> Optional[str]:
+    """
+    Resolve an executable for `name` from PATH, skipping claudex wrapper files.
+    """
+    wrapper_target = (wrapper_dir / name).resolve()
+    for raw_dir in os.environ.get("PATH", "").split(os.pathsep):
+        if not raw_dir:
+            continue
+        candidate = Path(raw_dir) / name
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved == wrapper_target:
+            continue
+        if not candidate.exists() or not candidate.is_file():
+            continue
+        if not os.access(candidate, os.X_OK):
+            continue
+        if _is_claudex_wrapper(candidate):
+            continue
+        return str(candidate)
+    return None
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
@@ -534,8 +581,15 @@ def install_wrappers(
     - `codex`      -> claudex chat/ask with codex preferred first
     - `claudecode` -> claudex chat/ask with claude preferred first
     """
+    real_codex = _find_real_binary("codex", directory)
+    if not real_codex:
+        err_console.print(
+            "[bold red]Could not locate the real codex binary in PATH.[/bold red]"
+        )
+        raise typer.Exit(1)
+
     wrappers = {
-        "codex": _wrapper_script(Provider.CODEX),
+        "codex": _wrapper_script(Provider.CODEX, real_codex_bin=real_codex),
         "claudecode": _wrapper_script(Provider.CLAUDE),
     }
 

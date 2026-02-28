@@ -21,6 +21,7 @@ Example JSONL stream (abbreviated):
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from typing import Optional
 
@@ -80,11 +81,16 @@ class CodexProvider(BaseProvider):
         cmd.append(prompt)
 
         try:
+            env = os.environ.copy()
+            # If user installed a `codex` wrapper that routes through claudex,
+            # mark provider-internal calls so wrappers can bypass recursion.
+            env["CLAUDEX_INNER_PROVIDER_CALL"] = "1"
             proc = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=300,
+                env=env,
             )
         except subprocess.TimeoutExpired:
             return ProviderResult(

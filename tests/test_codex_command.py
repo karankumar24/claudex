@@ -17,8 +17,9 @@ def _setup_provider(monkeypatch):
     proc.stderr = ""
     proc.returncode = 0
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, timeout, env):
         captured["cmd"] = cmd
+        captured["env"] = env
         return proc
 
     monkeypatch.setattr("claudex.providers.codex.subprocess.run", fake_run)
@@ -45,6 +46,7 @@ def test_command_uses_full_auto_flag(monkeypatch):
     assert "--dangerously-bypass-approvals-and-sandbox" not in cmd
     assert "--approval-mode" not in cmd
     assert cmd[-2:] == ["--json", "hello"]
+    assert captured["env"]["CLAUDEX_INNER_PROVIDER_CALL"] == "1"
 
 
 def test_command_uses_workspace_write_sandbox(monkeypatch):
