@@ -8,9 +8,8 @@ no real CLI calls are made.
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
-import pytest
 
-from claudex.models import ClaudexState, ErrorClass, Provider, ProviderState
+from claudex.models import ClaudexState, ErrorClass, Provider
 from claudex.providers.base import ProviderResult
 from claudex.router import (
     PROVIDERS,

@@ -8,6 +8,7 @@ Commands
   claudex status [--active]         — show provider state (+ active turn metadata)
   claudex install-wrappers          — install claude/claudecode/codex wrapper scripts
   claudex uninstall-wrappers        — remove wrapper scripts
+  claudex launch [-- args]          — open whichever CLI isn't cooling down (used by the wrappers)
   claudex reset                     — clear .claudex/ for the current repo
 """
 

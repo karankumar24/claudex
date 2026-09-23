@@ -6,8 +6,8 @@ It lives at .claudex/handoff.md and is OVERWRITTEN each turn (not appended)
 so it stays compact and under the configured line limit.
 
 When switching providers, the router prepends handoff.md content + a git
-snapshot to the outgoing prompt so the new provider picks up exactly where
-the previous one left off.
+snapshot to the outgoing prompt, so the new provider starts from the last
+exchange and the current state of the repo.
 """
 
 from __future__ import annotations

@@ -5,7 +5,6 @@ Tests for the Codex JSONL event stream parser (CodexProvider._parse_jsonl).
 import json
 from unittest.mock import MagicMock
 
-import pytest
 
 from claudex.models import ErrorClass
 from claudex.providers.codex import CodexProvider

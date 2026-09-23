@@ -2,8 +2,6 @@
 Tests for truncation / line-limit utilities in handoff.py.
 """
 
-import pytest
-
 from claudex.handoff import (
     _enforce_line_limit,
     _extract_section,

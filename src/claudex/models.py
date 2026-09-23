@@ -52,7 +52,7 @@ class ProviderState(BaseModel):
 class ClaudexState(BaseModel):
     """
     Root state object serialized to .claudex/state.json.
-    One file per repo (lives next to .git/).
+    One file per folder claudex runs in (.claudex/ under the current directory).
     """
     last_provider: Optional[Provider] = None
     claude: ProviderState = Field(default_factory=ProviderState)

@@ -3,9 +3,7 @@ Tests for state.py — read/write of .claudex/{state.json, handoff.md, transcrip
 """
 
 import json
-from pathlib import Path
 
-import pytest
 
 from claudex.models import ClaudexState, Provider, ProviderState
 from claudex.state import (

@@ -9,7 +9,7 @@ description = "Automatic failover between Claude Code CLI and Codex CLI with con
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "typer[all]>=0.12.0",
+    "typer>=0.12.0",
     "rich>=13.0.0",
     "pydantic>=2.0.0",
 ]
